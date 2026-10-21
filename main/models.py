@@ -11,6 +11,17 @@ class Reason(StrEnum):
     NOT_DIGITS = "not_digits"
 
 
+class ErrorCode(StrEnum):
+    FILE_NOT_FOUND = "file_not_found"
+    UNSUPPORTED_FILE = "unsupported_file"
+    NO_INPUT_DEVICE = "no_input_device"
+    AUDIO_READ_ERROR = "audio_read_error"
+    NO_SPEECH = "no_speech"
+    CANCELLED = "cancelled"
+    TRANSCRIPTION_ERROR = "transcription_error"
+    NO_NUMBER = "no_number"
+
+
 @dataclass(frozen=True)
 class Transcript:
     text: str
@@ -33,4 +44,5 @@ class Candidate:
 class RecognitionResult:
     transcript: str
     candidates: tuple[Candidate, ...]
-    error: str | None = None
+    error: ErrorCode | None = None
+    detail: str = ""

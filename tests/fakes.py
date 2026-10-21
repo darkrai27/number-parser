@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
+from typing import NoReturn
 
 import numpy as np
 
@@ -28,8 +30,28 @@ class FakeTranscriber:
 
 
 class FailingTranscriber:
+    def __init__(self, error: Exception | None = None) -> None:
+        self._error = error or RuntimeError("boom")
+
+    def _fail(self) -> NoReturn:
+        raise self._error
+
     def transcribe_file(self, path: Path) -> Transcript:
-        raise RuntimeError("boom")
+        self._fail()
 
     def transcribe_audio(self, audio: np.ndarray) -> Transcript:
-        raise RuntimeError("boom")
+        self._fail()
+
+
+class FailingMicrophone:
+    def __init__(self, error: Exception | None = None) -> None:
+        self._error = error or RuntimeError("no device")
+
+    def record(self, on_level: Callable[[float], None] | None = None) -> np.ndarray:
+        raise self._error
+
+    def cancel(self) -> None:
+        pass
+
+    def stop(self) -> None:
+        pass

@@ -10,9 +10,25 @@ from textual.binding import Binding
 from textual.widgets import DataTable, Static
 
 from main.engine import Recognizer
-from main.models import RecognitionResult
+from main.models import ErrorCode, RecognitionResult
 
 _START_MESSAGE = "Press SPACE to start speaking.\nQ quit"
+_ERROR_MESSAGES: dict[ErrorCode, str] = {
+    ErrorCode.FILE_NOT_FOUND: "Audio file not found",
+    ErrorCode.UNSUPPORTED_FILE: "Unsupported audio file",
+    ErrorCode.NO_INPUT_DEVICE: "Microphone is not available",
+    ErrorCode.AUDIO_READ_ERROR: "Could not read microphone",
+    ErrorCode.NO_SPEECH: "No speech detected",
+    ErrorCode.CANCELLED: "Capture cancelled",
+    ErrorCode.TRANSCRIPTION_ERROR: "Could not process audio",
+    ErrorCode.NO_NUMBER: "No telephone number recognized",
+}
+
+
+def format_error(error: ErrorCode, detail: str = "") -> str:
+    """Map a typed engine failure to user-facing English copy."""
+    message = _ERROR_MESSAGES[error]
+    return f"{message}: {detail}" if detail else f"{message}."
 
 
 class RecognitionApp(App[None]):
@@ -28,8 +44,10 @@ class RecognitionApp(App[None]):
 
     BINDINGS: ClassVar[list[Binding]] = [
         Binding("space", "start", "Start"),
+        Binding("c,C", "cancel", "Cancel"),
         Binding("r", "retry", "Retry"),
         Binding("q", "quit", "Quit"),
+        Binding("ctrl+c", "quit", "Quit", show=False, priority=True),
     ]
 
     def __init__(self, engine: Recognizer, file_path: str | None = None) -> None:
@@ -67,6 +85,16 @@ class RecognitionApp(App[None]):
     def action_retry(self) -> None:
         self._start()
 
+    def action_cancel(self) -> None:
+        if not self._listening:
+            return
+        self._listening = False
+        if self._timer is not None:
+            self._timer.stop()
+            self._timer = None
+        self.engine.cancel()
+        self._set_status("Cancelling…")
+
     def action_quit(self) -> None:
         self.engine.cancel()
         self.exit()
@@ -80,6 +108,7 @@ class RecognitionApp(App[None]):
         if self.file_path:
             self.run_worker(self._recognize_file(), exclusive=True)
         else:
+            self._listening = True
             self.run_worker(self._recognize_microphone(), exclusive=True)
 
     async def _prepare(self) -> None:
@@ -94,14 +123,13 @@ class RecognitionApp(App[None]):
         try:
             result = await asyncio.to_thread(self.engine.recognize_file, self.file_path)
         except Exception as exc:
-            result = RecognitionResult("", (), f"Recognition failed: {exc}")
+            result = RecognitionResult("", (), ErrorCode.TRANSCRIPTION_ERROR, str(exc))
         finally:
             self._busy = False
         self._show(result)
 
     async def _recognize_microphone(self) -> None:
         await self._prepare()
-        self._listening = True
         self._listening_started = time.monotonic()
         self._last_level = 0.0
         self._set_status("Listening…")
@@ -111,7 +139,7 @@ class RecognitionApp(App[None]):
                 self.engine.recognize_microphone, self._on_level, self._on_phase
             )
         except Exception as exc:
-            result = RecognitionResult("", (), f"Recognition failed: {exc}")
+            result = RecognitionResult("", (), ErrorCode.TRANSCRIPTION_ERROR, str(exc))
         finally:
             if self._timer is not None:
                 self._timer.stop()
@@ -131,6 +159,7 @@ class RecognitionApp(App[None]):
                 self.call_from_thread(self._show_transcribing)
 
     def _show_transcribing(self) -> None:
+        self._listening = False
         if self._timer is not None:
             self._timer.stop()
             self._timer = None
@@ -142,11 +171,15 @@ class RecognitionApp(App[None]):
         elapsed = time.monotonic() - self._listening_started
         filled = min(20, int(self._last_level * 20))
         meter = "█" * filled + "░" * (20 - filled)
-        self._set_status(f"Listening… {elapsed:.1f}s\n[{meter}]\nSPACE stop | Q quit")
+        self._set_status(f"Listening… {elapsed:.1f}s\n[{meter}]\nSPACE stop | C cancel | Q quit")
 
     def _show(self, result: RecognitionResult) -> None:
+        if result.error is ErrorCode.CANCELLED:
+            if self.is_running:
+                self._set_status(_START_MESSAGE)
+            return
         if result.error:
-            self._set_status(f"{result.error}\n\nR retry | Q quit")
+            self._set_status(f"{format_error(result.error, result.detail)}\n\nR retry | Q quit")
             return
 
         table = self.query_one(DataTable)

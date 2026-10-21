@@ -23,6 +23,15 @@ def digits(text: str) -> list[str]:
         ("two five and three four", ["25", "34"]),
         ("one hundred twenty three", ["123", "10023", "100203"]),
         ("one hundred and twenty three", ["123", "10023", "100203"]),
+        (
+            "one hundred twenty three thousand four hundred fifty six",
+            ["1231456", "100231456", "1002031456"],
+        ),
+        ("one hundred thousand", ["1001000"]),
+        ("one hundred thousand five", ["1001005"]),
+        ("sixty nine thousand", ["69000", "609000"]),
+        ("twenty five thousand", ["25000", "205000"]),
+        ("twenty five hundred", ["2500", "20500"]),
         ("two thousand five", ["2005"]),
         ("two thousand and five", ["2005"]),
         ("too five", ["25"]),
@@ -44,6 +53,14 @@ def test_twenty_five_keeps_both_interpretations() -> None:
     assert by_digits["205"].interpretation == "split"
     assert by_digits["205"].input == "20 5"
     assert all(candidate.reason is Reason.WRONG_LENGTH for candidate in by_digits.values())
+
+
+def test_hundred_thousand_keeps_spoken_grouping() -> None:
+    (candidate,) = parse_candidates("one hundred thousand")
+
+    assert candidate.digits == "1001000"
+    assert candidate.input == "100 1000"
+    assert candidate.interpretation == "compound"
 
 
 def test_scaled_phrase_keeps_all_groupings() -> None:

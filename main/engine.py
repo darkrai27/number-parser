@@ -4,9 +4,9 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol
 
-from main.asr.base import Transcriber
-from main.audio.microphone import Microphone
-from main.models import RecognitionResult, Transcript
+from main.asr.base import Transcriber, TranscriptionError, UnsupportedAudioError
+from main.audio.microphone import AudioReadError, CaptureCancelled, Microphone, NoInputDeviceError
+from main.models import ErrorCode, RecognitionResult, Transcript
 from main.numbers.parser import parse_candidates
 
 
@@ -40,12 +40,16 @@ class RecognitionEngine:
     def recognize_file(self, path: str | Path) -> RecognitionResult:
         source = Path(path)
         if not source.is_file():
-            return RecognitionResult("", (), f"Audio file not found: {source}")
+            return self._failure(ErrorCode.FILE_NOT_FOUND, str(source))
 
         try:
             transcript = self._transcriber.transcribe_file(source)
+        except UnsupportedAudioError as exc:
+            return self._failure(ErrorCode.UNSUPPORTED_FILE, str(exc))
+        except TranscriptionError as exc:
+            return self._failure(ErrorCode.TRANSCRIPTION_ERROR, str(exc))
         except Exception as exc:
-            return RecognitionResult("", (), f"Could not process audio: {exc}")
+            return self._failure(ErrorCode.TRANSCRIPTION_ERROR, str(exc))
         return self._result(transcript)
 
     def recognize_microphone(
@@ -54,25 +58,39 @@ class RecognitionEngine:
         on_phase: Callable[[str], None] | None = None,
     ) -> RecognitionResult:
         if self._microphone is None:
-            return RecognitionResult("", (), "Microphone is not available.")
+            return self._failure(ErrorCode.NO_INPUT_DEVICE)
 
         try:
             audio = self._microphone.record(on_level)
+        except CaptureCancelled:
+            return self._failure(ErrorCode.CANCELLED)
+        except NoInputDeviceError as exc:
+            return self._failure(ErrorCode.NO_INPUT_DEVICE, str(exc))
+        except AudioReadError as exc:
+            return self._failure(ErrorCode.AUDIO_READ_ERROR, str(exc))
         except Exception as exc:
-            return RecognitionResult("", (), f"Could not read microphone: {exc}")
+            return self._failure(ErrorCode.AUDIO_READ_ERROR, str(exc))
         if audio.size == 0:
-            return RecognitionResult("", (), "No speech detected.")
+            return self._failure(ErrorCode.NO_SPEECH)
 
         if on_phase is not None:
             on_phase("transcribing")
         try:
             transcript = self._transcriber.transcribe_audio(audio)
+        except TranscriptionError as exc:
+            return self._failure(ErrorCode.TRANSCRIPTION_ERROR, str(exc))
         except Exception as exc:
-            return RecognitionResult("", (), f"Could not process audio: {exc}")
+            return self._failure(ErrorCode.TRANSCRIPTION_ERROR, str(exc))
         return self._result(transcript)
 
     @staticmethod
+    def _failure(code: ErrorCode, detail: str = "", transcript: str = "") -> RecognitionResult:
+        return RecognitionResult(transcript, (), code, detail)
+
+    @staticmethod
     def _result(transcript: Transcript) -> RecognitionResult:
+        if not transcript.text and not transcript.alternatives:
+            return RecognitionEngine._failure(ErrorCode.NO_SPEECH)
         candidates = []
         seen: set[str] = set()
         for text in (transcript.text, *transcript.alternatives):
@@ -81,9 +99,5 @@ class RecognitionEngine:
                     seen.add(candidate.digits)
                     candidates.append(candidate)
         if not candidates:
-            return RecognitionResult(
-                transcript.text,
-                (),
-                "No telephone number recognized.",
-            )
+            return RecognitionEngine._failure(ErrorCode.NO_NUMBER, transcript=transcript.text)
         return RecognitionResult(transcript.text, tuple(candidates))

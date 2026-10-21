@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
 
+from main.asr.base import TranscriptionError, UnsupportedAudioError
 from main.models import Transcript
 
 if TYPE_CHECKING:
@@ -16,6 +18,11 @@ _NUMBER_WORDS = (
     "fourteen fifteen sixteen seventeen eighteen nineteen twenty thirty forty fifty "
     "sixty seventy eighty ninety hundred thousand"
 )
+_NUMBER_WORDS_SET = frozenset(_NUMBER_WORDS.split())
+_WORDS = re.compile(r"[a-z0-9]+")
+_MAX_NO_SPEECH = 0.6
+_MIN_LOGPROB = -1.0
+_MAX_COMPRESSION = 2.4
 
 
 class WhisperTranscriber:
@@ -43,13 +50,23 @@ class WhisperTranscriber:
     def transcribe_file(self, path: Path) -> Transcript:
         from faster_whisper import decode_audio
 
-        audio = decode_audio(str(path), sampling_rate=16000)
+        try:
+            audio = decode_audio(str(path), sampling_rate=16000)
+        except Exception as exc:
+            raise UnsupportedAudioError(str(exc)) from exc
         return self.transcribe_audio(audio)
 
     def transcribe_audio(self, audio: np.ndarray) -> Transcript:
-        model = self._model_instance()
-        primary, info = self._transcribe(model, audio, None)
-        worded, _ = self._transcribe(model, audio, _NUMBER_WORDS)
+        try:
+            model = self._model_instance()
+            primary, info = self._transcribe(model, audio, None)
+            worded = ""
+            if _has_number(primary):
+                worded, _ = self._transcribe(model, audio, _NUMBER_WORDS)
+        except TranscriptionError:
+            raise
+        except Exception as exc:
+            raise TranscriptionError(str(exc)) from exc
 
         texts = [text for text in (primary, worded) if text]
         alternatives = (worded,) if worded and worded != primary else ()
@@ -71,4 +88,16 @@ class WhisperTranscriber:
             condition_on_previous_text=False,
             initial_prompt=initial_prompt,
         )
-        return " ".join(segment.text.strip() for segment in segments).strip(), info
+        text = " ".join(
+            segment.text.strip()
+            for segment in segments
+            if segment.no_speech_prob <= _MAX_NO_SPEECH
+            and segment.avg_logprob >= _MIN_LOGPROB
+            and segment.compression_ratio <= _MAX_COMPRESSION
+        ).strip()
+        return text, info
+
+
+def _has_number(text: str) -> bool:
+    words = _WORDS.findall(text.lower())
+    return any(word.isdigit() or word in _NUMBER_WORDS_SET for word in words)

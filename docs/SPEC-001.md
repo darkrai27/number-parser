@@ -49,8 +49,9 @@ UI can be tested with a fake engine (no microphone, no model).
   including invalid rows, and list valid rows before invalid rows.
 - RF-11: When the result contains no candidate, the system shall display
   "No telephone number recognized", the transcript, and the available actions.
-- RF-12: If an operation fails, the system shall display an actionable error panel and
-  shall return to the start screen without printing a traceback.
+- RF-12: If an operation fails, the system shall display the user-facing copy mapped from
+  the engine's `ErrorCode` and `detail`, keep `R` and `Q` available, and never print a
+  traceback.
 - RF-13: When results or an error are displayed, the system shall allow `R` to start a new
   recognition and `Q` to quit.
 - RF-14: When the user presses `Ctrl+C` in any state, the system shall exit cleanly, stop
@@ -60,6 +61,9 @@ UI can be tested with a fake engine (no microphone, no model).
   results table.
 - RF-16: When the user presses `SPACE` while listening, the system shall stop capture and
   process the audio already recorded.
+- RF-17: While listening, when the user presses `C`, the system shall cancel capture,
+  discard the buffered audio, release the audio device, and return to the start screen
+  without exiting the application. `C` outside the listening state shall do nothing.
 
 ## Non-functional requirements
 
@@ -88,6 +92,7 @@ UI can be tested with a fake engine (no microphone, no model).
 - Model missing and the first download fails or is offline.
 - Terminal resize while recording or while the table is shown.
 - Repeated `R` presses and `Ctrl+C` during transcription or model load.
+- Repeated `C` presses, or `C` while idle or while a file is being processed.
 
 ## Out of scope
 
@@ -99,7 +104,7 @@ UI can be tested with a fake engine (no microphone, no model).
 
 ## Finalization criteria
 
-- RF-1 through RF-16 have automated Textual pilot tests using a fake engine (no mic/model).
+- RF-1 through RF-17 have automated Textual pilot tests using a fake engine (no mic/model).
 - Parser and validator unit tests from SPEC-002 pass.
 - `ruff check .`, `ruff format --check .`, and `pytest` pass.
 - Manual demo: live microphone run and `python -m main --file <fixture>.wav` both show a
@@ -112,7 +117,8 @@ UI can be tested with a fake engine (no microphone, no model).
 - Ambiguity is data, not an error: every candidate is shown, valid or not.
 - Country code variants `0030`, `+30`, and `30` are accepted; a bare 10-digit national
   number is valid. `Output` preserves the spoken prefix and never adds a missing `0030`.
-- Keyboard shortcuts: `SPACE` start, `R` retry, `Q` quit, `Ctrl+C` hard exit.
+- Keyboard shortcuts: `SPACE` start/stop, `C` cancel live capture and return to the start
+  screen, `R` retry, `Q` quit, `Ctrl+C` hard exit.
 
 ## Open questions
 

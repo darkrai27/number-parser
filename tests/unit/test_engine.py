@@ -5,8 +5,11 @@ from pathlib import Path
 
 import numpy as np
 
+from main.asr.base import TranscriptionError, UnsupportedAudioError
+from main.audio.microphone import AudioReadError, CaptureCancelled, NoInputDeviceError
 from main.engine import RecognitionEngine
-from tests.fakes import FailingTranscriber, FakeTranscriber
+from main.models import ErrorCode
+from tests.fakes import FailingMicrophone, FailingTranscriber, FakeTranscriber
 
 
 class FakeMicrophone:
@@ -27,17 +30,6 @@ class FakeMicrophone:
         self.stopped = True
 
 
-class FailingMicrophone:
-    def record(self, on_level: Callable[[float], None] | None = None) -> np.ndarray:
-        raise RuntimeError("no device")
-
-    def cancel(self) -> None:
-        pass
-
-    def stop(self) -> None:
-        pass
-
-
 def _audio(tmp_path: Path) -> Path:
     path = tmp_path / "call.wav"
     path.write_bytes(b"not real audio")
@@ -52,25 +44,54 @@ def test_recognize_file_returns_candidates(tmp_path: Path) -> None:
     assert [candidate.digits for candidate in result.candidates] == ["205"]
 
 
-def test_missing_file_returns_error(tmp_path: Path) -> None:
+def test_missing_file_returns_file_not_found(tmp_path: Path) -> None:
     result = RecognitionEngine(FakeTranscriber("two oh five")).recognize_file(tmp_path / "nope.wav")
 
     assert result.candidates == ()
-    assert "not found" in (result.error or "")
+    assert result.error is ErrorCode.FILE_NOT_FOUND
+    assert "nope.wav" in result.detail
 
 
-def test_transcript_without_number_returns_error(tmp_path: Path) -> None:
+def test_transcript_without_number_returns_no_number(tmp_path: Path) -> None:
     result = RecognitionEngine(FakeTranscriber("hello there")).recognize_file(_audio(tmp_path))
 
     assert result.candidates == ()
-    assert result.error == "No telephone number recognized."
+    assert result.error is ErrorCode.NO_NUMBER
+    assert result.transcript == "hello there"
+
+
+def test_empty_transcript_returns_no_speech(tmp_path: Path) -> None:
+    result = RecognitionEngine(FakeTranscriber("")).recognize_file(_audio(tmp_path))
+
+    assert result.candidates == ()
+    assert result.error is ErrorCode.NO_SPEECH
+
+
+def test_unsupported_file_is_typed(tmp_path: Path) -> None:
+    transcriber = FailingTranscriber(UnsupportedAudioError("bad codec"))
+
+    result = RecognitionEngine(transcriber).recognize_file(_audio(tmp_path))
+
+    assert result.candidates == ()
+    assert result.error is ErrorCode.UNSUPPORTED_FILE
+    assert result.detail == "bad codec"
 
 
 def test_transcriber_failure_is_returned_not_raised(tmp_path: Path) -> None:
     result = RecognitionEngine(FailingTranscriber()).recognize_file(_audio(tmp_path))
 
     assert result.candidates == ()
-    assert result.error == "Could not process audio: boom"
+    assert result.error is ErrorCode.TRANSCRIPTION_ERROR
+    assert result.detail == "boom"
+
+
+def test_typed_transcription_failure_is_mapped(tmp_path: Path) -> None:
+    transcriber = FailingTranscriber(TranscriptionError("model exploded"))
+
+    result = RecognitionEngine(transcriber).recognize_file(_audio(tmp_path))
+
+    assert result.error is ErrorCode.TRANSCRIPTION_ERROR
+    assert result.detail == "model exploded"
 
 
 def test_alternative_transcript_adds_candidates(tmp_path: Path) -> None:
@@ -97,6 +118,13 @@ def test_microphone_result_is_parsed() -> None:
     assert phases == ["transcribing"]
 
 
+def test_missing_microphone_is_typed() -> None:
+    result = RecognitionEngine(FakeTranscriber("two oh five")).recognize_microphone()
+
+    assert result.candidates == ()
+    assert result.error is ErrorCode.NO_INPUT_DEVICE
+
+
 def test_empty_recording_returns_no_speech() -> None:
     engine = RecognitionEngine(
         FakeTranscriber("two oh five"), FakeMicrophone(np.empty(0, dtype=np.float32))
@@ -105,7 +133,40 @@ def test_empty_recording_returns_no_speech() -> None:
     result = engine.recognize_microphone()
 
     assert result.candidates == ()
-    assert result.error == "No speech detected."
+    assert result.error is ErrorCode.NO_SPEECH
+
+
+def test_cancelled_capture_is_typed() -> None:
+    engine = RecognitionEngine(
+        FakeTranscriber("two oh five"), FailingMicrophone(CaptureCancelled("cancelled"))
+    )
+
+    result = engine.recognize_microphone()
+
+    assert result.candidates == ()
+    assert result.error is ErrorCode.CANCELLED
+
+
+def test_no_input_device_is_typed() -> None:
+    engine = RecognitionEngine(
+        FakeTranscriber("two oh five"), FailingMicrophone(NoInputDeviceError("no default input"))
+    )
+
+    result = engine.recognize_microphone()
+
+    assert result.error is ErrorCode.NO_INPUT_DEVICE
+    assert result.detail == "no default input"
+
+
+def test_audio_read_error_is_typed() -> None:
+    engine = RecognitionEngine(
+        FakeTranscriber("two oh five"), FailingMicrophone(AudioReadError("stream died"))
+    )
+
+    result = engine.recognize_microphone()
+
+    assert result.error is ErrorCode.AUDIO_READ_ERROR
+    assert result.detail == "stream died"
 
 
 def test_microphone_failure_is_returned_not_raised() -> None:
@@ -114,7 +175,20 @@ def test_microphone_failure_is_returned_not_raised() -> None:
     result = engine.recognize_microphone()
 
     assert result.candidates == ()
-    assert result.error == "Could not read microphone: no device"
+    assert result.error is ErrorCode.AUDIO_READ_ERROR
+    assert result.detail == "no device"
+
+
+def test_microphone_transcription_failure_is_typed() -> None:
+    engine = RecognitionEngine(
+        FailingTranscriber(TranscriptionError("mic model failed")),
+        FakeMicrophone(np.ones(160)),
+    )
+
+    result = engine.recognize_microphone()
+
+    assert result.error is ErrorCode.TRANSCRIPTION_ERROR
+    assert result.detail == "mic model failed"
 
 
 def test_cancel_reaches_microphone() -> None:

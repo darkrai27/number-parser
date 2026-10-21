@@ -79,10 +79,14 @@ Dependency direction: `tui → engine → audio/asr`; `numbers` imports only std
 - Preload the Whisper model in the CLI **before** `RecognitionApp.run()`. Loading it
   inside a Textual worker makes tqdm/multiprocessing fail with `bad value(s) in
   fds_to_keep`. See `WhisperTranscriber.load()`.
-- Microphone capture is 16 kHz mono, 30 ms frames, webrtcvad mode 2. Endpointing: 3 voiced
+- Microphone capture is 16 kHz mono, 30 ms frames, webrtcvad mode 3. Endpointing: 3 voiced
   frames to start, 3 s silence to stop, 10 s no-speech timeout, 30 s max, 300 ms pre-roll.
+- Whisper filters segments with `no_speech_prob > 0.6`, `avg_logprob < -1.0`, or
+  `compression_ratio > 2.4`. The word-form pass runs only when the default transcript
+  contains a digit or number word; empty transcripts map to `no_speech`.
 - Level/phase callbacks come from the capture thread; the TUI must marshal them with
-  `call_from_thread`. `Q`/`Ctrl+C` calls `engine.cancel()` to release the stream.
+  `call_from_thread`. `Q`/`Ctrl+C` calls `engine.cancel()` to release the stream; `C`
+  cancels live capture and returns to the start screen without exiting.
 - English only in UI strings, errors, identifiers, specs, and docs.
 - Logs go to stderr—stdout belongs to Textual. No `print()` in TUI code.
 - No cloud STT, no API keys, no persisted audio, no telephony features without asking.

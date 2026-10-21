@@ -28,7 +28,8 @@ python -m main --model small.en
 ```
 
 In live mode, press `SPACE` and speak the number in English. Recording stops after three
-seconds of silence, or press `SPACE` again to stop immediately. `R` retries, `Q` quits.
+seconds of silence, or press `SPACE` again to stop immediately. Press `C` while listening
+to cancel and return to the start screen. `R` retries, `Q` quits.
 
 ## Docs
 

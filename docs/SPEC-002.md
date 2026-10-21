@@ -10,8 +10,10 @@ microphone stream or an audio file, detects when speech starts and ends, transcr
 extracts every plausible digit sequence, and validates candidates against the Greek
 numbering rules. It returns a typed result to the TUI; it does not render anything.
 
-Phone numbers are spoken with different groupings, and ASR output is noisy. The engine
-must preserve ambiguity instead of silently choosing one interpretation. For example,
+Phone numbers are spoken as a sequence of numbers, each with at most three digits (for
+example `2 10 69 30 6 6 4`); the candidate is the concatenation of those numbers.
+Different groupings and ASR noise make several readings plausible. The engine must
+preserve ambiguity instead of silently choosing one interpretation. For example,
 "twenty five" can be heard as `25` (compound) or `20 5` → `205` (split), and
 "seven hundred twenty four" as `724`, `70024`, or `700204`. All are candidates and all
 are displayed. Only candidates that normalize to `0030` + a valid 10-digit Greek
@@ -72,8 +74,42 @@ class Candidate:
 class RecognitionResult:
     transcript: str
     candidates: tuple[Candidate, ...]
-    error: str | None      # None on success; typed message otherwise
+    error: ErrorCode | None  # None on success; typed failure otherwise
+    detail: str = ""         # diagnostic text; never a traceback
 ```
+
+`ErrorCode` is a stable machine-readable enum shared by the engine and the TUI:
+
+```python
+class ErrorCode(StrEnum):
+    FILE_NOT_FOUND = "file_not_found"
+    UNSUPPORTED_FILE = "unsupported_file"
+    NO_INPUT_DEVICE = "no_input_device"
+    AUDIO_READ_ERROR = "audio_read_error"
+    NO_SPEECH = "no_speech"
+    CANCELLED = "cancelled"
+    TRANSCRIPTION_ERROR = "transcription_error"
+    NO_NUMBER = "no_number"
+```
+
+`detail` carries the failing path or exception message for diagnostics. The TUI owns the
+user-facing copy; the engine never returns presentation prose.
+
+## Error taxonomy
+
+| Code | Trigger |
+| --- | --- |
+| `file_not_found` | `--file` path does not exist or is not a file. |
+| `unsupported_file` | The audio file cannot be decoded. |
+| `no_input_device` | No default input device, or the device cannot be opened. |
+| `audio_read_error` | The microphone stream fails while capturing. |
+| `no_speech` | Capture ended with no samples to transcribe. |
+| `cancelled` | The user cancelled capture with `C`; buffered audio is discarded. |
+| `transcription_error` | Model inference or transcript processing fails. |
+| `no_number` | The transcript contains no digits or number words. |
+
+Model loading is a CLI startup step, not an engine call, so it is not an `ErrorCode`.
+The CLI reports `Could not load speech model: {detail}` on stderr and exits with status 1.
 
 ## Functional requirements (EARS)
 
@@ -89,8 +125,11 @@ class RecognitionResult:
   captured.
 - RF-6: When speech ends, the engine shall transcribe it twice in English with
   faster-whisper using the configured model (default `base.en`, CPU, `int8`): once with
-  default decoding and once with a number-word `initial_prompt`. Both transcripts are
-  returned, with the word-form pass in `Transcript.alternatives`.
+  default decoding and once with a number-word `initial_prompt`. The second pass runs
+  only if the first contains a digit or number word. Segments with
+  `no_speech_prob > 0.6`, `avg_logprob < -1.0`, or `compression_ratio > 2.4` are discarded.
+  Both resulting transcripts are returned, with the word-form pass in
+  `Transcript.alternatives`.
 - RF-7: When transcription completes, the engine shall extract every plausible telephone
   number candidate from every transcript.
 - RF-8: The parser shall support digits, units, teens, tens, hundreds, and thousands,
@@ -113,9 +152,13 @@ class RecognitionResult:
   10 digits and starts with `2` or `69`, whether or not the country code was spoken.
 - RF-15: The validator shall mark every other candidate invalid with a specific reason:
   `wrong_length`, `wrong_prefix`, or `not_digits`.
-- RF-16: If audio input, decoding, model loading, or transcription fails, the engine
-  shall return a typed error (`no_input_device`, `audio_read_error`, `unsupported_file`,
-  `model_load_error`, `transcription_error`) instead of raising into the TUI.
+- RF-16: If audio input, decoding, or transcription fails, the engine shall return a
+  `RecognitionResult` carrying an `ErrorCode` (`file_not_found`, `unsupported_file`,
+  `no_input_device`, `audio_read_error`, or `transcription_error`) and a diagnostic
+  `detail` instead of raising into the TUI. Silence, user cancellation, and an empty
+  candidate set are typed outcomes (`no_speech`, `cancelled`, `no_number`), not
+  exceptions. Model loading happens in the CLI before the TUI starts; a load failure is
+  reported to stderr and exits with status 1.
 
 ## Parsing rules
 
@@ -125,8 +168,15 @@ class RecognitionResult:
 - The tens+unit rule (RF-9) emits both compound and split forms for every adjacent pair,
   including inside larger phrases: `sixty nine` → `69`, `609`.
 - The hundreds rule (RF-10) emits the compound form plus split forms using each remainder
-  variant: `seven hundred twenty four` → `724`, `70024`, `700204`. Thousands stay
-  compound to limit combinatorial noise.
+  variant: `seven hundred twenty four` → `724`, `70024`, `700204`.
+- A scale keeps every prefix variant: `sixty nine thousand` → `69000` (compound) and
+  `609000` (split `60 9`); `twenty five hundred` → `2500`, `20500`.
+- The utterance is a sequence of spoken numbers, each with at most three digits. A
+  hundreds group followed by `thousand` therefore stays two groups instead of becoming a
+  six-digit product: `one hundred thousand` → `100 1000` (digits `1001000`), never
+  `100000`. `one hundred twenty three thousand four hundred fifty six` → `123 1456`
+  (digits `1231456`) plus the split variants of the prefix. Remainders after `thousand`
+  stay compound to limit combinatorial noise.
 - Candidates are generated by composing every item variant across the utterance, then
   deduplicating by digits. The branch count is capped at 256.
 - Dual transcripts are parsed independently and unioned; the default transcript is shown
@@ -186,6 +236,7 @@ lengths. A country code followed by anything other than 10 digits is invalid
 - Whisper returning digits (`0-0-30-69-724-1352`) or words for the same audio; both must
   be parsed, and the word pass must recover grouping evidence.
 - Empty transcript, transcript without digits, unsupported sample rate, stereo input.
+- User cancels live capture before or during speech; buffered audio is discarded.
 - Model not cached and the machine is offline; corrupted audio file.
 
 ## Out of scope
@@ -203,8 +254,8 @@ lengths. A country code followed by anything other than 10 digits is invalid
   homophones, country-code variants, multiple numbers, tens+unit ambiguity, and
   hundred-group ambiguity.
 - Validator tests cover every reason code and the `2` / `69` prefix rule.
-- Engine tests use fake transcripts, including `Transcript.alternatives`; no microphone or
-  model download.
+- Engine tests use fake transcripts and typed failures, including `Transcript.alternatives`;
+  every `ErrorCode` is asserted; no microphone or model download.
 - Real-audio tests run `pytest -m integration` against `audios/examples/` (not committed)
   and skip when the directory is absent.
 - `ruff check .`, `ruff format --check .`, and `pytest` pass.
@@ -213,10 +264,14 @@ lengths. A country code followed by anything other than 10 digits is invalid
 
 - STT: faster-whisper, local, `base.en` default, CPU `int8`.
 - ASR ambiguity: two decodes per file — default for accurate digits, number-word
-  `initial_prompt` for grouping — then parse and union both.
-- VAD: `webrtcvad` frame classification with 3-second silence endpointing and a 10-second
-  no-speech timeout.
+  `initial_prompt` for grouping — but the word pass runs only when the default transcript
+  contains a number. Low-confidence segments are filtered to prevent silence/noise
+  hallucinations.
+- VAD: `webrtcvad` mode 3 frame classification with 3-second silence endpointing and a
+  10-second no-speech timeout.
 - Audio: live microphone by default; `--file` bypasses capture.
+- Cancellation: `C` stops a live capture, discards buffered audio, and returns to the
+  start screen without exiting; cancellation is a typed `cancelled` outcome.
 - Ambiguity: emit compound and split interpretations for tens+unit and hundreds, plus
   homophones; never silently coerce to one answer.
 - Validation: country-code variants are accepted; a bare 10-digit national number is

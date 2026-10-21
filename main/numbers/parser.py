@@ -143,6 +143,7 @@ class _Parsed:
     value: int
     variants: tuple[_Variant, ...]
     next_index: int
+    from_hundred: bool = False
 
 
 def _small(tokens: list[_Token], index: int) -> _Parsed:
@@ -177,10 +178,19 @@ def _small(tokens: list[_Token], index: int) -> _Parsed:
 
 def _scale(tokens: list[_Token], index: int, prefix: _Parsed | None) -> _Parsed:
     token = tokens[index]
-    base = (prefix.value if prefix else 1) * token.value
-    prefix_flags = frozenset()
-    if prefix and any("homophone" in variant.flags for variant in prefix.variants):
-        prefix_flags = frozenset({"homophone"})
+    scale = token.value
+
+    if prefix is None:
+        scaled = (_Variant(str(scale), str(scale), frozenset({"compound"})),)
+    else:
+        scaled = tuple(
+            _Variant(
+                str(int(variant.digits) * scale),
+                str(int(variant.digits) * scale),
+                variant.flags | {"compound"},
+            )
+            for variant in prefix.variants
+        )
 
     remainder: _Parsed | None = None
     start = index + 1
@@ -190,35 +200,55 @@ def _scale(tokens: list[_Token], index: int, prefix: _Parsed | None) -> _Parsed:
     if start < len(tokens) and tokens[start].kind in remainder_kinds:
         remainder = _small(tokens, start) if token.kind == "hundred" else _item(tokens, start)
 
-    if remainder is None:
-        return _Parsed(
-            base,
-            (_Variant(str(base), str(base), prefix_flags | {"compound"}),),
-            start,
-        )
-
-    total = base + remainder.value
-    variants: list[_Variant] = [_Variant(str(total), str(total), prefix_flags | {"compound"})]
+    variants: list[_Variant] = []
     if token.kind == "hundred":
+        for base in scaled:
+            if remainder is None:
+                variants.append(base)
+                continue
+            total = int(base.digits) + remainder.value
+            variants.append(_Variant(str(total), str(total), base.flags | {"compound"}))
+            variants.extend(
+                _Variant(
+                    f"{base.digits}{part.digits}",
+                    f"{base.digits} {part.text}",
+                    base.flags | part.flags | {"split"},
+                )
+                for part in remainder.variants
+            )
+    elif prefix is not None and prefix.from_hundred:
+        # A spoken sequence holds numbers up to three digits, so "one hundred thousand"
+        # is "100 1000", not the six-digit product 100000.
+        joined = str(scale + (remainder.value if remainder is not None else 0))
         variants.extend(
             _Variant(
-                f"{base}{variant.digits}",
-                f"{base} {variant.text}",
-                prefix_flags | variant.flags | {"split"},
+                f"{base.digits}{joined}",
+                f"{base.text} {joined}",
+                base.flags | {"compound"},
             )
-            for variant in remainder.variants
+            for base in prefix.variants
         )
-    return _Parsed(total, tuple(variants), remainder.next_index)
+    else:
+        for base in scaled:
+            if remainder is None:
+                variants.append(base)
+                continue
+            total = int(base.digits) + remainder.value
+            variants.append(_Variant(str(total), str(total), base.flags | {"compound"}))
+
+    return _Parsed(
+        int(variants[0].digits),
+        tuple(variants),
+        remainder.next_index if remainder is not None else start,
+        from_hundred=token.kind == "hundred",
+    )
 
 
 def _item(tokens: list[_Token], index: int) -> _Parsed:
     token = tokens[index]
-    if token.kind in _SCALES:
-        return _scale(tokens, index, None)
-
-    parsed = _small(tokens, index)
-    if parsed.next_index < len(tokens) and tokens[parsed.next_index].kind in _SCALES:
-        return _scale(tokens, parsed.next_index, parsed)
+    parsed = _scale(tokens, index, None) if token.kind in _SCALES else _small(tokens, index)
+    while parsed.next_index < len(tokens) and tokens[parsed.next_index].kind in _SCALES:
+        parsed = _scale(tokens, parsed.next_index, parsed)
     return parsed
 
 
