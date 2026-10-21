@@ -1,0 +1,49 @@
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[project]
+name = "omilia-challenge"
+version = "0.1.0"
+description = "English-only TUI for recognizing spoken telephone numbers"
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+license = { text = "Proprietary" }
+dependencies = [
+  "textual>=8.2,<9",
+  "faster-whisper>=1.2,<2",
+  "sounddevice>=0.5,<1",
+  "webrtcvad-wheels>=2.0.14,<3",
+  "numpy>=1.26,<3",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8,<9",
+  "pytest-asyncio>=1,<2",
+  "ruff>=0.12,<1",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["main"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["main", "tests"]
+# 0.17+ formats fenced Python blocks in Markdown; keep specs hand-formatted.
+extend-exclude = ["*.md"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["main"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+asyncio_mode = "auto"
+markers = [
+  "integration: requires a microphone, a real ASR model, or real audio (opt-in)",
+]
