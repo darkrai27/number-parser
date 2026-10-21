@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import numpy as np
+
 from main.models import Transcript
 
 if TYPE_CHECKING:
@@ -42,6 +44,9 @@ class WhisperTranscriber:
         from faster_whisper import decode_audio
 
         audio = decode_audio(str(path), sampling_rate=16000)
+        return self.transcribe_audio(audio)
+
+    def transcribe_audio(self, audio: np.ndarray) -> Transcript:
         model = self._model_instance()
         primary, info = self._transcribe(model, audio, None)
         worded, _ = self._transcribe(model, audio, _NUMBER_WORDS)

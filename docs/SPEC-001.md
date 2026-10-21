@@ -58,6 +58,8 @@ UI can be tested with a fake engine (no microphone, no model).
 - RF-15: When the application is started with `--file PATH`, the system shall skip
   microphone capture, process that file through the same pipeline, and display the same
   results table.
+- RF-16: When the user presses `SPACE` while listening, the system shall stop capture and
+  process the audio already recorded.
 
 ## Non-functional requirements
 
@@ -97,7 +99,7 @@ UI can be tested with a fake engine (no microphone, no model).
 
 ## Finalization criteria
 
-- RF-1 through RF-15 have automated Textual pilot tests using a fake engine (no mic/model).
+- RF-1 through RF-16 have automated Textual pilot tests using a fake engine (no mic/model).
 - Parser and validator unit tests from SPEC-002 pass.
 - `ruff check .`, `ruff format --check .`, and `pytest` pass.
 - Manual demo: live microphone run and `python -m main --file <fixture>.wav` both show a

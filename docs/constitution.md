@@ -55,7 +55,7 @@ and ask before changing it. Specs may add detail; they may not weaken these rule
 ## 7. UX
 
 - English-only copy, no tracebacks, and every error says what the user can do next.
-- Keyboard-only operation; `SPACE` start, `R` retry, `Q` quit, `Ctrl+C` clean exit.
+- Keyboard-only operation; `SPACE` start/stop, `R` retry, `Q` quit, `Ctrl+C` clean exit.
 - Live feedback is required while listening and while transcribing.
 - At least 80x24 terminals must remain usable.
 

@@ -9,10 +9,10 @@ validation).
 
 ## Status
 
-File-path pipeline is implemented end to end: PyAV decode → two faster-whisper passes
-(default digits + number-word prompt) → parser → Textual results table.
-`python -m main --file PATH` works. Live microphone/VAD and the listening screen are
-still pending; `python -m main` shows a placeholder start screen.
+File and live-microphone pipelines are implemented end to end: PyAV decode or
+sounddevice/webrtcvad capture → two faster-whisper passes (default digits + number-word
+prompt) → parser → Textual results table. Both `python -m main` and
+`python -m main --file PATH` work.
 
 ## Setup
 
@@ -30,11 +30,11 @@ pip install -e ".[dev]"
 ## Commands
 
 ```bash
-python -m main --file sample.wav   # decode, transcribe, show results (working)
-python -m main                     # live microphone TUI (not implemented yet)
+python -m main                     # live microphone TUI
+python -m main --file sample.wav   # deterministic file path
 pytest                            # unit tests; no mic/model/network
 pytest tests/unit/test_parser.py::test_twenty_five_keeps_both_interpretations  # single test
-pytest -m integration             # opt-in: real audio/model
+pytest -m integration             # opt-in: real audio/model; skips if audios/ is absent
 ruff check .                      # lint
 ruff format .                     # format
 ruff check . && ruff format --check . && pytest      # full verification
@@ -48,12 +48,12 @@ without running the `--file` path or the live app.
 ```text
 main/__main__.py   CLI (--file, --model); no domain logic
 main/models.py     shared frozen dataclasses (Transcript, Candidate, RecognitionResult)
-main/engine.py     file path -> transcribe -> parse -> result
+main/engine.py     file/microphone -> transcribe -> parse -> result
 main/tui/          Textual app + results table; fake-engine pilot tests
 main/asr/          Transcriber protocol + faster-whisper adapter (lazy import)
+main/audio/        sounddevice capture + webrtcvad endpointing
 main/numbers/      parser + Greek validator; pure and synchronous
-main/audio/        capture + VAD (not implemented yet)
-tests/unit/        parser/validator/engine/pilot tests, no hardware
+tests/unit/        parser/validator/engine/endpoint/pilot tests, no hardware
 tests/integration/ real audio/model tests, marked `integration`
 ```
 
@@ -79,6 +79,10 @@ Dependency direction: `tui → engine → audio/asr`; `numbers` imports only std
 - Preload the Whisper model in the CLI **before** `RecognitionApp.run()`. Loading it
   inside a Textual worker makes tqdm/multiprocessing fail with `bad value(s) in
   fds_to_keep`. See `WhisperTranscriber.load()`.
+- Microphone capture is 16 kHz mono, 30 ms frames, webrtcvad mode 2. Endpointing: 3 voiced
+  frames to start, 3 s silence to stop, 10 s no-speech timeout, 30 s max, 300 ms pre-roll.
+- Level/phase callbacks come from the capture thread; the TUI must marshal them with
+  `call_from_thread`. `Q`/`Ctrl+C` calls `engine.cancel()` to release the stream.
 - English only in UI strings, errors, identifiers, specs, and docs.
 - Logs go to stderr—stdout belongs to Textual. No `print()` in TUI code.
 - No cloud STT, no API keys, no persisted audio, no telephony features without asking.

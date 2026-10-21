@@ -22,10 +22,13 @@ Live capture requires microphone permission.
 ## Usage
 
 ```bash
-python -m main --file call.wav # process a file (working)
-python -m main                 # live microphone TUI (pending)
+python -m main                 # live microphone TUI
+python -m main --file call.wav # process a file instead of the microphone
 python -m main --model small.en
 ```
+
+In live mode, press `SPACE` and speak the number in English. Recording stops after three
+seconds of silence, or press `SPACE` again to stop immediately. `R` retries, `Q` quits.
 
 ## Docs
 
@@ -37,5 +40,6 @@ python -m main --model small.en
 ## Verification
 
 ```bash
-ruff check . && ruff format --check . && pytest
+ruff check . && ruff format --check . && pytest   # unit suite
+pytest -m integration                             # real TTS audio + model
 ```

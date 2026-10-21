@@ -1,22 +1,22 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import time
 from typing import ClassVar
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.widgets import DataTable, Static
 
-from main.engine import RecognitionEngine
+from main.engine import Recognizer
 from main.models import RecognitionResult
 
-_NO_FILE_MESSAGE = (
-    "Live microphone mode is not implemented yet.\nRun: python -m main --file PATH\n\nQ quit"
-)
+_START_MESSAGE = "Press SPACE to start speaking.\nQ quit"
 
 
 class RecognitionApp(App[None]):
-    """Minimal TUI: start, transcribe a file, show candidates, retry or quit."""
+    """TUI: start, record or load audio, show candidates, retry or quit."""
 
     TITLE = "Omilia Challenge"
     CSS = """
@@ -32,11 +32,15 @@ class RecognitionApp(App[None]):
         Binding("q", "quit", "Quit"),
     ]
 
-    def __init__(self, engine: RecognitionEngine, file_path: str | None = None) -> None:
+    def __init__(self, engine: Recognizer, file_path: str | None = None) -> None:
         super().__init__()
         self.engine = engine
         self.file_path = file_path
         self._busy = False
+        self._listening = False
+        self._timer = None
+        self._listening_started = 0.0
+        self._last_level = 0.0
 
     def compose(self) -> ComposeResult:
         yield Static("Omilia Challenge — telephone number recognition", id="title", markup=False)
@@ -50,27 +54,42 @@ class RecognitionApp(App[None]):
         if self.file_path:
             self._start()
         else:
-            self._set_status(_NO_FILE_MESSAGE)
+            self._set_status(_START_MESSAGE)
 
     def action_start(self) -> None:
+        if self._listening:
+            self.engine.stop_recording()
+            self._listening = False
+            self._set_status("Processing…")
+            return
         self._start()
 
     def action_retry(self) -> None:
         self._start()
 
+    def action_quit(self) -> None:
+        self.engine.cancel()
+        self.exit()
+
+    def on_unmount(self) -> None:
+        self.engine.cancel()
+
     def _start(self) -> None:
         if self._busy:
             return
-        if not self.file_path:
-            self._set_status(_NO_FILE_MESSAGE)
-            return
-        self.run_worker(self._recognize(), exclusive=True)
+        if self.file_path:
+            self.run_worker(self._recognize_file(), exclusive=True)
+        else:
+            self.run_worker(self._recognize_microphone(), exclusive=True)
 
-    async def _recognize(self) -> None:
+    async def _prepare(self) -> None:
         self._busy = True
         table = self.query_one(DataTable)
         table.clear()
         table.display = False
+
+    async def _recognize_file(self) -> None:
+        await self._prepare()
         self._set_status("Transcribing…")
         try:
             result = await asyncio.to_thread(self.engine.recognize_file, self.file_path)
@@ -79,6 +98,51 @@ class RecognitionApp(App[None]):
         finally:
             self._busy = False
         self._show(result)
+
+    async def _recognize_microphone(self) -> None:
+        await self._prepare()
+        self._listening = True
+        self._listening_started = time.monotonic()
+        self._last_level = 0.0
+        self._set_status("Listening…")
+        self._timer = self.set_interval(0.1, self._tick)
+        try:
+            result = await asyncio.to_thread(
+                self.engine.recognize_microphone, self._on_level, self._on_phase
+            )
+        except Exception as exc:
+            result = RecognitionResult("", (), f"Recognition failed: {exc}")
+        finally:
+            if self._timer is not None:
+                self._timer.stop()
+                self._timer = None
+            self._listening = False
+            self._busy = False
+        self._show(result)
+
+    def _on_level(self, level: float) -> None:
+        self._last_level = level
+        with contextlib.suppress(RuntimeError):
+            self.call_from_thread(self._tick)
+
+    def _on_phase(self, phase: str) -> None:
+        if phase == "transcribing":
+            with contextlib.suppress(RuntimeError):
+                self.call_from_thread(self._show_transcribing)
+
+    def _show_transcribing(self) -> None:
+        if self._timer is not None:
+            self._timer.stop()
+            self._timer = None
+        self._set_status("Transcribing…")
+
+    def _tick(self) -> None:
+        if not self._busy:
+            return
+        elapsed = time.monotonic() - self._listening_started
+        filled = min(20, int(self._last_level * 20))
+        meter = "█" * filled + "░" * (20 - filled)
+        self._set_status(f"Listening… {elapsed:.1f}s\n[{meter}]\nSPACE stop | Q quit")
 
     def _show(self, result: RecognitionResult) -> None:
         if result.error:

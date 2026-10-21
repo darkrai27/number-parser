@@ -42,7 +42,7 @@ known-first-party = ["main", "tests"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q --strict-markers"
+addopts = "-q --strict-markers -m 'not integration'"
 asyncio_mode = "auto"
 markers = [
   "integration: requires a microphone, a real ASR model, or real audio (opt-in)",

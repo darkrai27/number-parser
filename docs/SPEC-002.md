@@ -81,7 +81,7 @@ class RecognitionResult:
   default input device, or decode `--file PATH` when supplied.
 - RF-2: While capturing, the engine shall classify 20–30 ms frames with a VAD and shall
   consider speech started after three consecutive voiced frames.
-- RF-3: When 1.0 second of silence follows speech, the engine shall stop capturing and
+- RF-3: When 3.0 seconds of silence follows speech, the engine shall stop capturing and
   process the buffered speech.
 - RF-4: If no speech is detected within 10 seconds, the engine shall stop and return a
   `no_speech` result.
@@ -203,9 +203,10 @@ lengths. A country code followed by anything other than 10 digits is invalid
   homophones, country-code variants, multiple numbers, tens+unit ambiguity, and
   hundred-group ambiguity.
 - Validator tests cover every reason code and the `2` / `69` prefix rule.
-- Engine integration tests use fake transcripts, including `Transcript.alternatives`, and
-  a small WAV fixture; they do not require a microphone or a model download.
-- Real-audio/model tests are marked `integration` and are opt-in.
+- Engine tests use fake transcripts, including `Transcript.alternatives`; no microphone or
+  model download.
+- Real-audio tests run `pytest -m integration` against `audios/examples/` (not committed)
+  and skip when the directory is absent.
 - `ruff check .`, `ruff format --check .`, and `pytest` pass.
 
 ## Decisions recorded
@@ -213,7 +214,8 @@ lengths. A country code followed by anything other than 10 digits is invalid
 - STT: faster-whisper, local, `base.en` default, CPU `int8`.
 - ASR ambiguity: two decodes per file — default for accurate digits, number-word
   `initial_prompt` for grouping — then parse and union both.
-- VAD: `webrtcvad` frame classification with a 10-second no-speech timeout.
+- VAD: `webrtcvad` frame classification with 3-second silence endpointing and a 10-second
+  no-speech timeout.
 - Audio: live microphone by default; `--file` bypasses capture.
 - Ambiguity: emit compound and split interpretations for tens+unit and hundreds, plus
   homophones; never silently coerce to one answer.

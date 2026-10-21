@@ -29,19 +29,19 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
     from main.asr.whisper import WhisperTranscriber
+    from main.audio.microphone import Microphone
     from main.engine import RecognitionEngine
     from main.tui.app import RecognitionApp
 
     transcriber = WhisperTranscriber(args.model)
-    if args.file:
-        print(f"Loading speech model {args.model}…", file=sys.stderr, flush=True)
-        try:
-            transcriber.load()
-        except Exception as exc:
-            print(f"Could not load speech model: {exc}", file=sys.stderr)
-            return 1
+    print(f"Loading speech model {args.model}…", file=sys.stderr, flush=True)
+    try:
+        transcriber.load()
+    except Exception as exc:
+        print(f"Could not load speech model: {exc}", file=sys.stderr)
+        return 1
 
-    engine = RecognitionEngine(transcriber)
+    engine = RecognitionEngine(transcriber, Microphone())
     RecognitionApp(engine, file_path=args.file).run()
     return 0
 
