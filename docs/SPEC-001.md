@@ -39,18 +39,23 @@ UI can be tested with a fake engine (no microphone, no model).
 - RF-5: When the engine reports that speech ended, the system shall enter a processing
   state with a spinner and the status "Transcribing…".
 - RF-6: When the recognition result is available, the system shall display a table with the
-  columns `#`, `Variant`, `Heard as`, `Greek number`, and `Status`.
-- RF-7: When the result contains valid Greek numbers, the system shall list valid rows
-  before invalid rows and show the canonical number as `0030XXXXXXXXXX`.
-- RF-8: When the result contains no candidate, the system shall display
+  columns `#`, `Input`, `Output`, `Status`, and `Reason`.
+- RF-7: The `Input` column shall contain digits only, separated by spaces, and reflect the
+  candidate's grouping (for example `two ten` → `2 10`, split `twenty five` → `20 5`).
+- RF-8: The `Status` column shall contain exactly `VALID` or `invalid`.
+- RF-9: The `Reason` column shall be empty for valid numbers and contain the validation
+  reason for invalid numbers.
+- RF-10: The system shall show the parsed digits in `Output` for every candidate,
+  including invalid rows, and list valid rows before invalid rows.
+- RF-11: When the result contains no candidate, the system shall display
   "No telephone number recognized", the transcript, and the available actions.
-- RF-9: If an operation fails, the system shall display an actionable error panel and shall
-  return to the start screen without printing a traceback.
-- RF-10: When results or an error are displayed, the system shall allow `R` to start a new
+- RF-12: If an operation fails, the system shall display an actionable error panel and
+  shall return to the start screen without printing a traceback.
+- RF-13: When results or an error are displayed, the system shall allow `R` to start a new
   recognition and `Q` to quit.
-- RF-11: When the user presses `Ctrl+C` in any state, the system shall exit cleanly, stop
+- RF-14: When the user presses `Ctrl+C` in any state, the system shall exit cleanly, stop
   recording, and release the audio device.
-- RF-12: When the application is started with `--file PATH`, the system shall skip
+- RF-15: When the application is started with `--file PATH`, the system shall skip
   microphone capture, process that file through the same pipeline, and display the same
   results table.
 
@@ -92,7 +97,7 @@ UI can be tested with a fake engine (no microphone, no model).
 
 ## Finalization criteria
 
-- RF-1 through RF-12 have automated Textual pilot tests using a fake engine (no mic/model).
+- RF-1 through RF-15 have automated Textual pilot tests using a fake engine (no mic/model).
 - Parser and validator unit tests from SPEC-002 pass.
 - `ruff check .`, `ruff format --check .`, and `pytest` pass.
 - Manual demo: live microphone run and `python -m main --file <fixture>.wav` both show a
@@ -103,8 +108,8 @@ UI can be tested with a fake engine (no microphone, no model).
 - TUI framework: Textual (pilot tests cover the state machine).
 - Input: live microphone by default; `--file` for deterministic demos and tests.
 - Ambiguity is data, not an error: every candidate is shown, valid or not.
-- Country code variants `0030`, `+30`, and `30` are normalized; a bare 10-digit national
-  number is displayed but marked invalid ("missing country code").
+- Country code variants `0030`, `+30`, and `30` are accepted; a bare 10-digit national
+  number is valid. `Output` preserves the spoken prefix and never adds a missing `0030`.
 - Keyboard shortcuts: `SPACE` start, `R` retry, `Q` quit, `Ctrl+C` hard exit.
 
 ## Open questions

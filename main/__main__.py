@@ -26,13 +26,25 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    build_parser().parse_args(argv)
-    print(
-        "main: foundation scaffold only; the recognition pipeline is not implemented yet.",
-        file=sys.stderr,
-    )
-    return 2
+    args = build_parser().parse_args(argv)
+
+    from main.asr.whisper import WhisperTranscriber
+    from main.engine import RecognitionEngine
+    from main.tui.app import RecognitionApp
+
+    transcriber = WhisperTranscriber(args.model)
+    if args.file:
+        print(f"Loading speech model {args.model}…", file=sys.stderr, flush=True)
+        try:
+            transcriber.load()
+        except Exception as exc:
+            print(f"Could not load speech model: {exc}", file=sys.stderr)
+            return 1
+
+    engine = RecognitionEngine(transcriber)
+    RecognitionApp(engine, file_path=args.file).run()
+    return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    sys.exit(main())

@@ -26,14 +26,17 @@ and ask before changing it. Specs may add detail; they may not weaken these rule
 - Never silently pick one interpretation of an utterance.
 - Return every plausible candidate, including invalid ones, with a reason.
 - "twenty five" produces both `25` (compound) and `205` (split, `20` + `5`).
+- "seven hundred twenty four" produces `724`, `70024`, and `700204`.
+- Whisper runs twice: default digits and a number-word prompt. Parse both transcripts and
+  deduplicate by digits.
 - Deduplicate by digits only, preserving the first source fragment and discovery order.
 
 ## 4. Validation
 
 - Canonical Greek form: `0030` + 10 national digits.
 - National number is valid only if it starts with `2` or `69`.
-- Normalize `0030`, `+30`, and `30` as the country code; a missing country code is
-  invalid (`missing_country_code`) but the candidate is still displayed.
+- Accept `0030`, `+30`, `30`, and bare 10-digit national numbers; output preserves the
+  spoken prefix and never adds `0030` when it was absent.
 - Do not invent a country code or pad/truncate digits to make a number valid.
 
 ## 5. Privacy and offline operation

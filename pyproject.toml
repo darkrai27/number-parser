@@ -38,7 +38,7 @@ extend-exclude = ["*.md"]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["main"]
+known-first-party = ["main", "tests"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

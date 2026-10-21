@@ -4,12 +4,15 @@ English-only TUI that recognizes spoken telephone numbers, lists every plausible
 variant, and flags valid Greek numbers. Local/offline after the ASR model is cached.
 
 Read `docs/constitution.md` plus the spec for the area before changing behavior:
-`SPEC-001.md` (TUI/orchestration), `SPEC-002.md` (audio → ASR → candidates → validation).
+`docs/SPEC-001.md` (TUI/orchestration), `docs/SPEC-002.md` (audio → ASR → candidates →
+validation).
 
 ## Status
 
-Foundation stage: specs/config exist; `main/` is a runnable placeholder. Recognition is
-not implemented yet. Replace the placeholder as the first implementation step.
+File-path pipeline is implemented end to end: PyAV decode → two faster-whisper passes
+(default digits + number-word prompt) → parser → Textual results table.
+`python -m main --file PATH` works. Live microphone/VAD and the listening screen are
+still pending; `python -m main` shows a placeholder start screen.
 
 ## Setup
 
@@ -27,10 +30,10 @@ pip install -e ".[dev]"
 ## Commands
 
 ```bash
-python -m main                     # live microphone + TUI
-python -m main --file sample.wav   # deterministic path, no microphone
+python -m main --file sample.wav   # decode, transcribe, show results (working)
+python -m main                     # live microphone TUI (not implemented yet)
 pytest                            # unit tests; no mic/model/network
-pytest tests/test_cli.py::test_module_help_lists_cli_options   # single test
+pytest tests/unit/test_parser.py::test_twenty_five_keeps_both_interpretations  # single test
 pytest -m integration             # opt-in: real audio/model
 ruff check .                      # lint
 ruff format .                     # format
@@ -40,17 +43,17 @@ ruff check . && ruff format --check . && pytest      # full verification
 Run verification in that order before handing work back. Do not claim a UI change works
 without running the `--file` path or the live app.
 
-## Target layout
+## Layout
 
 ```text
 main/__main__.py   CLI (--file, --model); no domain logic
 main/models.py     shared frozen dataclasses (Transcript, Candidate, RecognitionResult)
-main/engine.py     orchestrates capture -> transcribe -> parse -> validate
-main/tui/          Textual screens; fake-engine pilot tests
-main/audio/        capture + VAD; mono 16 kHz float32
+main/engine.py     file path -> transcribe -> parse -> result
+main/tui/          Textual app + results table; fake-engine pilot tests
 main/asr/          Transcriber protocol + faster-whisper adapter (lazy import)
 main/numbers/      parser + Greek validator; pure and synchronous
-tests/unit/       parser/validator/pilot tests, no hardware
+main/audio/        capture + VAD (not implemented yet)
+tests/unit/        parser/validator/engine/pilot tests, no hardware
 tests/integration/ real audio/model tests, marked `integration`
 ```
 
@@ -59,16 +62,23 @@ Dependency direction: `tui → engine → audio/asr`; `numbers` imports only std
 
 ## Non-obvious rules
 
-- Valid Greek number = `0030` + 10 digits starting with `2` or `69`. Normalize `0030`,
-  `+30`, `30`; a bare 10-digit number is shown but invalid (`missing_country_code`).
-- "twenty five" must yield both `25` (compound) and `205` (split `20` + `5`). Never
-  collapse ambiguity; never drop invalid candidates.
+- Valid Greek number = 10 national digits starting with `2` or `69`, with or without the
+  country code. Accept `0030`, `+30`, `30`, and bare numbers, but never add `0030` that
+  was not spoken; `Output` preserves the spoken prefix.
+- "twenty five" must yield both `25` (compound) and `205` (split `20` + `5`), and
+  "seven hundred twenty four" must yield `724`, `70024`, `700204`. Never collapse
+  ambiguity; never drop invalid candidates.
+- Whisper is decoded twice: default for accurate digits, number-word prompt for grouping.
+  Parse primary and `Transcript.alternatives`, then dedupe by digits.
 - Parser/validator are deterministic and pure: no I/O, clock, randomness, locale, or
   Textual imports.
 - Unit tests must not touch a mic, model, network, or real audio. Fake the boundaries;
   mark real-audio/model tests `@pytest.mark.integration`.
 - Run audio/model/transcription off the Textual event loop (`asyncio.to_thread` or a
   worker); no blocking handler.
+- Preload the Whisper model in the CLI **before** `RecognitionApp.run()`. Loading it
+  inside a Textual worker makes tqdm/multiprocessing fail with `bad value(s) in
+  fds_to_keep`. See `WhisperTranscriber.load()`.
 - English only in UI strings, errors, identifiers, specs, and docs.
 - Logs go to stderr—stdout belongs to Textual. No `print()` in TUI code.
 - No cloud STT, no API keys, no persisted audio, no telephony features without asking.
