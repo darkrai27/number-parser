@@ -6,6 +6,7 @@ import pytest
 
 from main.asr.whisper import WhisperTranscriber
 from main.engine import RecognitionEngine
+from main.models import ErrorCode
 from main.numbers.greek import validate
 
 pytestmark = pytest.mark.integration
@@ -14,6 +15,11 @@ EXAMPLES = Path(__file__).resolve().parents[2] / "audios" / "examples"
 KNOWN_MISRECOGNIZED = {
     "2-10-69-30-6-6-4.mp3",
     "2-10-69-30-6-60-4.mp3",
+}
+GROUP_TOO_LARGE = {
+    "1000023.mp3",
+    "1024-125000.mp3",
+    "33000-20-453.mp3",
 }
 
 if not EXAMPLES.is_dir():
@@ -49,6 +55,11 @@ def _params() -> list[pytest.ParameterSet]:
 def test_example_audio(path: Path) -> None:
     expected = expected_digits(path)
     result = _ENGINE.recognize_file(path)
+
+    if path.name in GROUP_TOO_LARGE:
+        assert result.error is ErrorCode.GROUP_TOO_LARGE
+        assert result.candidates == ()
+        return
 
     assert result.error is None
     candidate = next((c for c in result.candidates if c.digits == expected), None)

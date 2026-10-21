@@ -22,6 +22,7 @@ _ERROR_MESSAGES: dict[ErrorCode, str] = {
     ErrorCode.CANCELLED: "Capture cancelled",
     ErrorCode.TRANSCRIPTION_ERROR: "Could not process audio",
     ErrorCode.NO_NUMBER: "No telephone number recognized",
+    ErrorCode.GROUP_TOO_LARGE: "Number groups may have at most three digits",
 }
 
 

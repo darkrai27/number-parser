@@ -7,6 +7,9 @@ Valid Greek numbers are 10-digit national numbers starting with `2` or `69`. The
 country code is optional; `0030`, `+30`, and `30` are accepted, and output never adds a
 prefix that was not spoken.
 
+Spoken groups are limited to three digits: `twelve hundred` → `12 100`, `twenty five
+hundred` → `20 500`. Utterances containing `thousand` or larger units are rejected.
+
 ## Setup
 
 ```bash

@@ -20,6 +20,7 @@ class ErrorCode(StrEnum):
     CANCELLED = "cancelled"
     TRANSCRIPTION_ERROR = "transcription_error"
     NO_NUMBER = "no_number"
+    GROUP_TOO_LARGE = "group_too_large"
 
 
 @dataclass(frozen=True)

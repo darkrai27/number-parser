@@ -92,10 +92,27 @@ async def _wait_for_status(pilot, text: str) -> None:  # type: ignore[no-untyped
         (ErrorCode.CANCELLED, "", "Capture cancelled."),
         (ErrorCode.TRANSCRIPTION_ERROR, "boom", "Could not process audio: boom"),
         (ErrorCode.NO_NUMBER, "", "No telephone number recognized."),
+        (
+            ErrorCode.GROUP_TOO_LARGE,
+            "",
+            "Number groups may have at most three digits.",
+        ),
     ],
 )
 def test_format_error_maps_every_code(code: ErrorCode, detail: str, expected: str) -> None:
     assert format_error(code, detail) == expected
+
+
+async def test_group_too_large_shows_error(tmp_path: Path) -> None:
+    app = RecognitionApp(RecognitionEngine(FakeTranscriber("one thousand")), str(_audio(tmp_path)))
+
+    async with app.run_test(size=(100, 30)) as pilot:
+        await _paused(pilot)
+
+        assert "Number groups may have at most three digits" in str(
+            app.query_one("#status", Static).content
+        )
+        assert not app.query_one(DataTable).display
 
 
 async def test_missing_file_shows_error_and_retry(tmp_path: Path) -> None:

@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 _NUMBER_WORDS = (
     "zero one two three four five six seven eight nine ten eleven twelve thirteen "
     "fourteen fifteen sixteen seventeen eighteen nineteen twenty thirty forty fifty "
-    "sixty seventy eighty ninety hundred thousand"
+    "sixty seventy eighty ninety hundred thousand million billion trillion"
 )
 _NUMBER_WORDS_SET = frozenset(_NUMBER_WORDS.split())
 _WORDS = re.compile(r"[a-z0-9]+")

@@ -67,6 +67,13 @@ def test_empty_transcript_returns_no_speech(tmp_path: Path) -> None:
     assert result.error is ErrorCode.NO_SPEECH
 
 
+def test_group_too_large_is_typed(tmp_path: Path) -> None:
+    result = RecognitionEngine(FakeTranscriber("one thousand")).recognize_file(_audio(tmp_path))
+
+    assert result.candidates == ()
+    assert result.error is ErrorCode.GROUP_TOO_LARGE
+
+
 def test_unsupported_file_is_typed(tmp_path: Path) -> None:
     transcriber = FailingTranscriber(UnsupportedAudioError("bad codec"))
 

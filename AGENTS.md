@@ -68,6 +68,9 @@ Dependency direction: `tui → engine → audio/asr`; `numbers` imports only std
 - "twenty five" must yield both `25` (compound) and `205` (split `20` + `5`), and
   "seven hundred twenty four" must yield `724`, `70024`, `700204`. Never collapse
   ambiguity; never drop invalid candidates.
+- Each word-derived group is at most 3 digits. `twelve hundred` → `12 100`; `twenty five
+  hundred` → `20 500`; never `1200`, `2500`, or `25 100`. `thousand` and larger units
+  are rejected (`GroupTooLargeError` → `group_too_large`), not silently ignored.
 - Whisper is decoded twice: default for accurate digits, number-word prompt for grouping.
   Parse primary and `Transcript.alternatives`, then dedupe by digits.
 - Parser/validator are deterministic and pure: no I/O, clock, randomness, locale, or

@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from main.models import Reason
-from main.numbers.parser import parse_candidates
+from main.numbers.parser import GroupTooLargeError, parse_candidates
 
 
 def digits(text: str) -> list[str]:
@@ -23,17 +23,9 @@ def digits(text: str) -> list[str]:
         ("two five and three four", ["25", "34"]),
         ("one hundred twenty three", ["123", "10023", "100203"]),
         ("one hundred and twenty three", ["123", "10023", "100203"]),
-        (
-            "one hundred twenty three thousand four hundred fifty six",
-            ["1231456", "100231456", "1002031456"],
-        ),
-        ("one hundred thousand", ["1001000"]),
-        ("one hundred thousand five", ["1001005"]),
-        ("sixty nine thousand", ["69000", "609000"]),
-        ("twenty five thousand", ["25000", "205000"]),
-        ("twenty five hundred", ["2500", "20500"]),
-        ("two thousand five", ["2005"]),
-        ("two thousand and five", ["2005"]),
+        ("twelve hundred", ["12100"]),
+        ("twenty five hundred", ["20500"]),
+        ("twenty hundred", ["20100"]),
         ("too five", ["25"]),
         ("won two", ["12"]),
         ("to", []),
@@ -55,12 +47,37 @@ def test_twenty_five_keeps_both_interpretations() -> None:
     assert all(candidate.reason is Reason.WRONG_LENGTH for candidate in by_digits.values())
 
 
-def test_hundred_thousand_keeps_spoken_grouping() -> None:
-    (candidate,) = parse_candidates("one hundred thousand")
+def test_hundred_binding_respects_three_digit_groups() -> None:
+    by_digits = {
+        candidate.digits: candidate for candidate in parse_candidates("twenty five hundred")
+    }
 
-    assert candidate.digits == "1001000"
-    assert candidate.input == "100 1000"
-    assert candidate.interpretation == "compound"
+    assert by_digits["20500"].input == "20 500"
+    assert "2500" not in by_digits
+    assert "25100" not in by_digits
+
+    (twelve,) = parse_candidates("twelve hundred")
+    assert twelve.digits == "12100"
+    assert twelve.input == "12 100"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "thousand",
+        "one thousand",
+        "two thousand five",
+        "one hundred thousand",
+        "sixty nine thousand",
+        "one million",
+        "two billion",
+        "five trillion",
+        "millions",
+    ],
+)
+def test_large_units_are_rejected(text: str) -> None:
+    with pytest.raises(GroupTooLargeError):
+        parse_candidates(text)
 
 
 def test_scaled_phrase_keeps_all_groupings() -> None:

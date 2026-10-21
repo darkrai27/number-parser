@@ -132,15 +132,20 @@ The CLI reports `Could not load speech model: {detail}` on stderr and exits with
   `Transcript.alternatives`.
 - RF-7: When transcription completes, the engine shall extract every plausible telephone
   number candidate from every transcript.
-- RF-8: The parser shall support digits, units, teens, tens, hundreds, and thousands,
-  `oh`/`o`/`zero`/`nought`/`nil`, `double X`, `triple X`, hyphens, and common ASR
-  homophones (`two/to/too`, `four/for`, `one/won`, `eight/ate`, `three/free`).
+- RF-8: The parser shall support digits, units, teens, tens, hundreds, `oh`/`o`/`zero`/
+  `nought`/`nil`, `double X`, `triple X`, hyphens, and common ASR homophones
+  (`two/to/too`, `four/for`, `one/won`, `eight/ate`, `three/free`). Each word-derived
+  group is limited to three digits.
 - RF-9: When a tens word is immediately followed by a unit word, the parser shall emit
   both the compound candidate and the split candidate (for example "twenty five" →
   `25` and `205`).
-- RF-10: When a hundreds phrase is followed by a remainder, the parser shall emit both
-  the compound candidate and the split candidates (for example "seven hundred twenty
-  four" → `724`, `70024`, `700204`). Thousands remain compound.
+- RF-10: When a hundreds phrase cannot form a group of at most three digits, the parser
+  shall keep the prefix and `100` as separate groups (`twelve hundred` → `12 100`,
+  `twenty five hundred` → `20 500`). When it can, compound and split candidates are
+  emitted (`seven hundred twenty four` → `724`, `70024`, `700204`).
+- RF-10a: If an utterance contains `thousand` or a larger unit (`million`, `billion`,
+  `trillion`, ...), the parser shall raise `GroupTooLargeError`; the engine shall return
+  `group_too_large`.
 - RF-11: The parser shall deduplicate candidates by digits across all transcripts, keep
   the first source fragment, and never discard a candidate because it is invalid.
 - RF-12: If no transcript contains digits, the engine shall return a `no_number` result
@@ -154,11 +159,11 @@ The CLI reports `Could not load speech model: {detail}` on stderr and exits with
   `wrong_length`, `wrong_prefix`, or `not_digits`.
 - RF-16: If audio input, decoding, or transcription fails, the engine shall return a
   `RecognitionResult` carrying an `ErrorCode` (`file_not_found`, `unsupported_file`,
-  `no_input_device`, `audio_read_error`, or `transcription_error`) and a diagnostic
-  `detail` instead of raising into the TUI. Silence, user cancellation, and an empty
-  candidate set are typed outcomes (`no_speech`, `cancelled`, `no_number`), not
-  exceptions. Model loading happens in the CLI before the TUI starts; a load failure is
-  reported to stderr and exits with status 1.
+  `no_input_device`, `audio_read_error`, `transcription_error`, or
+  `group_too_large`) and a diagnostic `detail` instead of raising into the TUI. Silence,
+  user cancellation, and an empty candidate set are typed outcomes (`no_speech`,
+  `cancelled`, `no_number`), not exceptions. Model loading happens in the CLI before the
+  TUI starts; a load failure is reported to stderr and exits with status 1.
 
 ## Parsing rules
 
@@ -167,16 +172,17 @@ The CLI reports `Could not load speech model: {detail}` on stderr and exits with
 - Adjacent groups are concatenated: `two five` → 25, `zero zero three zero` → 0030.
 - The tens+unit rule (RF-9) emits both compound and split forms for every adjacent pair,
   including inside larger phrases: `sixty nine` → `69`, `609`.
-- The hundreds rule (RF-10) emits the compound form plus split forms using each remainder
-  variant: `seven hundred twenty four` → `724`, `70024`, `700204`.
-- A scale keeps every prefix variant: `sixty nine thousand` → `69000` (compound) and
-  `609000` (split `60 9`); `twenty five hundred` → `2500`, `20500`.
-- The utterance is a sequence of spoken numbers, each with at most three digits. A
-  hundreds group followed by `thousand` therefore stays two groups instead of becoming a
-  six-digit product: `one hundred thousand` → `100 1000` (digits `1001000`), never
-  `100000`. `one hundred twenty three thousand four hundred fifty six` → `123 1456`
-  (digits `1231456`) plus the split variants of the prefix. Remainders after `thousand`
-  stay compound to limit combinatorial noise.
+- Each word-derived group is limited to three digits.
+- The hundreds rule (RF-10) binds `hundred` to the preceding number when the product is
+  at most 999: `seven hundred` → `700`.
+- If the prefix is a tens+unit pair and the product would exceed 999, `hundred` binds to
+  the unit: `twenty five hundred` → `20 500` (`20500`), never `2500` or `25 100`.
+- Otherwise the prefix and `100` stay separate: `twelve hundred` → `12 100` (`12100`),
+  never `1200`.
+- Remainders still produce compound and split variants when they fit:
+  `seven hundred twenty four` → `724`, `70024`, `700204`.
+- `thousand` and larger units (`million`, `billion`, `trillion`, ...) are rejected:
+  they cannot form a group of at most three digits.
 - Candidates are generated by composing every item variant across the utterance, then
   deduplicating by digits. The branch count is capped at 256.
 - Dual transcripts are parsed independently and unioned; the default transcript is shown
@@ -233,6 +239,8 @@ lengths. A country code followed by anything other than 10 digits is invalid
 - Leading zeros, repeated digits, `double oh`, `triple zero`.
 - More or fewer than 10 national digits; national numbers starting with `1`, `69`, `2`.
 - ASR homophones and word-boundary errors (`twenty five` vs `twenty-five`).
+- Hundreds phrases that would exceed three digits (`twelve hundred`, `twenty five
+  hundred`) and utterances containing `thousand` or larger units.
 - Whisper returning digits (`0-0-30-69-724-1352`) or words for the same audio; both must
   be parsed, and the word pass must recover grouping evidence.
 - Empty transcript, transcript without digits, unsupported sample rate, stereo input.
@@ -250,9 +258,10 @@ lengths. A country code followed by anything other than 10 digits is invalid
 
 ## Finalization criteria
 
-- Table-driven parser tests cover units, teens, tens, scales, `double`/`triple`,
-  homophones, country-code variants, multiple numbers, tens+unit ambiguity, and
-  hundred-group ambiguity.
+- Table-driven parser tests cover units, teens, tens, hundreds, `double`/`triple`,
+  homophones, country-code variants, multiple numbers, tens+unit ambiguity,
+  hundred-group ambiguity, and the three-digit group limit.
+- `thousand` and larger units are rejected with `group_too_large` and a TUI error message.
 - Validator tests cover every reason code and the `2` / `69` prefix rule.
 - Engine tests use fake transcripts and typed failures, including `Transcript.alternatives`;
   every `ErrorCode` is asserted; no microphone or model download.
@@ -274,6 +283,8 @@ lengths. A country code followed by anything other than 10 digits is invalid
   start screen without exiting; cancellation is a typed `cancelled` outcome.
 - Ambiguity: emit compound and split interpretations for tens+unit and hundreds, plus
   homophones; never silently coerce to one answer.
+- Group size: each word-derived group is at most three digits. Hundreds that would
+  overflow are split; `thousand` and larger units are rejected as `group_too_large`.
 - Validation: country-code variants are accepted; a bare 10-digit national number is
   valid. Output preserves the spoken prefix and never adds `0030`.
 

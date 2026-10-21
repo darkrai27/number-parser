@@ -54,15 +54,33 @@ _HOMOPHONES = {
     "free": 3,
     "o": 0,
 }
-_SCALES = {"hundred": 100, "thousand": 1000}
+_SCALES = {"hundred": 100}
+_LARGE_UNITS = frozenset(
+    {
+        "thousand",
+        "thousands",
+        "million",
+        "millions",
+        "billion",
+        "billions",
+        "trillion",
+        "trillions",
+        "quadrillion",
+        "quadrillions",
+    }
+)
 _WORDS = re.compile(r"[a-z0-9]+")
 _MAX_STATES = 256  # ponytail: hard cap on ambiguity branches; revisit if real input overflows
+
+
+class GroupTooLargeError(ValueError):
+    """A spoken group would require more than three digits."""
 
 
 @dataclass(frozen=True)
 class _Token:
     text: str
-    kind: str  # unit | teen | tens | hundred | thousand | digits
+    kind: str  # unit | teen | tens | hundred | large | digits
     value: int
     homophone: bool = False
     weak: bool = False
@@ -71,6 +89,8 @@ class _Token:
 def _token(word: str) -> _Token | None:
     if word.isdigit():
         return _Token(word, "digits", int(word))
+    if word in _LARGE_UNITS:
+        return _Token(word, "large", 0)
     if word in _UNITS:
         return _Token(word, "unit", _UNITS[word])
     if word in _TEENS:
@@ -143,7 +163,6 @@ class _Parsed:
     value: int
     variants: tuple[_Variant, ...]
     next_index: int
-    from_hundred: bool = False
 
 
 def _small(tokens: list[_Token], index: int) -> _Parsed:
@@ -176,72 +195,81 @@ def _small(tokens: list[_Token], index: int) -> _Parsed:
     )
 
 
+def _hundred(
+    lead_text: str,
+    lead_digits: str,
+    base: int,
+    remainder: _Parsed | None,
+    flags: frozenset[str],
+) -> tuple[_Variant, ...]:
+    def joined(*parts: str) -> str:
+        return " ".join(part for part in parts if part)
+
+    if remainder is None:
+        return (
+            _Variant(f"{lead_digits}{base}", joined(lead_text, str(base)), flags | {"compound"}),
+        )
+
+    variants = [
+        _Variant(
+            f"{lead_digits}{base + remainder.value}",
+            joined(lead_text, str(base + remainder.value)),
+            flags | {"compound"},
+        )
+    ]
+    variants.extend(
+        _Variant(
+            f"{lead_digits}{base}{part.digits}",
+            joined(lead_text, str(base), part.text),
+            flags | part.flags | {"split"},
+        )
+        for part in remainder.variants
+    )
+    return tuple(variants)
+
+
 def _scale(tokens: list[_Token], index: int, prefix: _Parsed | None) -> _Parsed:
     token = tokens[index]
-    scale = token.value
+    if token.kind != "hundred":
+        raise GroupTooLargeError
+
+    start = index + 1
+    remainder = None
+    if start < len(tokens) and tokens[start].kind in {"unit", "teen", "tens", "digits"}:
+        remainder = _small(tokens, start)
+    next_index = remainder.next_index if remainder is not None else start
+
+    prefix_flags = frozenset()
+    if prefix is not None and any("homophone" in variant.flags for variant in prefix.variants):
+        prefix_flags = frozenset({"homophone"})
 
     if prefix is None:
-        scaled = (_Variant(str(scale), str(scale), frozenset({"compound"})),)
-    else:
-        scaled = tuple(
-            _Variant(
-                str(int(variant.digits) * scale),
-                str(int(variant.digits) * scale),
-                variant.flags | {"compound"},
-            )
-            for variant in prefix.variants
-        )
+        variants = _hundred("", "", token.value, remainder, prefix_flags)
+        value = token.value + (remainder.value if remainder is not None else 0)
+        return _Parsed(value, variants, next_index)
 
-    remainder: _Parsed | None = None
-    start = index + 1
-    remainder_kinds = {"unit", "teen", "tens", "digits"}
-    if token.kind == "thousand":
-        remainder_kinds.add("hundred")
-    if start < len(tokens) and tokens[start].kind in remainder_kinds:
-        remainder = _small(tokens, start) if token.kind == "hundred" else _item(tokens, start)
+    if prefix.value * token.value <= 999:
+        variants = _hundred("", "", prefix.value * token.value, remainder, prefix_flags)
+        value = prefix.value * token.value + (remainder.value if remainder is not None else 0)
+        return _Parsed(value, variants, next_index)
 
-    variants: list[_Variant] = []
-    if token.kind == "hundred":
-        for base in scaled:
-            if remainder is None:
-                variants.append(base)
-                continue
-            total = int(base.digits) + remainder.value
-            variants.append(_Variant(str(total), str(total), base.flags | {"compound"}))
-            variants.extend(
-                _Variant(
-                    f"{base.digits}{part.digits}",
-                    f"{base.digits} {part.text}",
-                    base.flags | part.flags | {"split"},
-                )
-                for part in remainder.variants
-            )
-    elif prefix is not None and prefix.from_hundred:
-        # A spoken sequence holds numbers up to three digits, so "one hundred thousand"
-        # is "100 1000", not the six-digit product 100000.
-        joined = str(scale + (remainder.value if remainder is not None else 0))
-        variants.extend(
-            _Variant(
-                f"{base.digits}{joined}",
-                f"{base.text} {joined}",
-                base.flags | {"compound"},
-            )
-            for base in prefix.variants
-        )
-    else:
-        for base in scaled:
-            if remainder is None:
-                variants.append(base)
-                continue
-            total = int(base.digits) + remainder.value
-            variants.append(_Variant(str(total), str(total), base.flags | {"compound"}))
+    split = next((variant for variant in prefix.variants if "split" in variant.flags), None)
+    if split is not None:
+        chunks = split.text.split()
+        unit = int(chunks[-1])
+        lead_text = " ".join(chunks[:-1])
+        lead_digits = split.digits[: -len(str(unit))]
+        variants = _hundred(lead_text, lead_digits, unit * 100, remainder, prefix_flags)
+        value = unit * 100 + (remainder.value if remainder is not None else 0)
+        return _Parsed(value, variants, next_index)
 
-    return _Parsed(
-        int(variants[0].digits),
-        tuple(variants),
-        remainder.next_index if remainder is not None else start,
-        from_hundred=token.kind == "hundred",
+    variants = tuple(
+        variant
+        for part in prefix.variants
+        for variant in _hundred(part.text, part.digits, token.value, remainder, prefix_flags)
     )
+    value = token.value + (remainder.value if remainder is not None else 0)
+    return _Parsed(value, variants, next_index)
 
 
 def _item(tokens: list[_Token], index: int) -> _Parsed:
@@ -281,9 +309,13 @@ def _interpretation(flags: frozenset[str]) -> str:
 
 def parse_candidates(text: str) -> tuple[Candidate, ...]:
     """Extract every plausible digit sequence from an English transcript."""
+    tokens = _tokenize(text)
+    if any(token is not None and token.kind == "large" for token in tokens):
+        raise GroupTooLargeError
+
     runs: list[list[_Token]] = []
     current: list[_Token] = []
-    for token in _tokenize(text):
+    for token in tokens:
         if token is None:
             if current:
                 runs.append(current)

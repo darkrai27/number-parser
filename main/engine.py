@@ -7,7 +7,7 @@ from typing import Protocol
 from main.asr.base import Transcriber, TranscriptionError, UnsupportedAudioError
 from main.audio.microphone import AudioReadError, CaptureCancelled, Microphone, NoInputDeviceError
 from main.models import ErrorCode, RecognitionResult, Transcript
-from main.numbers.parser import parse_candidates
+from main.numbers.parser import GroupTooLargeError, parse_candidates
 
 
 class Recognizer(Protocol):
@@ -93,11 +93,14 @@ class RecognitionEngine:
             return RecognitionEngine._failure(ErrorCode.NO_SPEECH)
         candidates = []
         seen: set[str] = set()
-        for text in (transcript.text, *transcript.alternatives):
-            for candidate in parse_candidates(text):
-                if candidate.digits not in seen:
-                    seen.add(candidate.digits)
-                    candidates.append(candidate)
+        try:
+            for text in (transcript.text, *transcript.alternatives):
+                for candidate in parse_candidates(text):
+                    if candidate.digits not in seen:
+                        seen.add(candidate.digits)
+                        candidates.append(candidate)
+        except GroupTooLargeError:
+            return RecognitionEngine._failure(ErrorCode.GROUP_TOO_LARGE, transcript=transcript.text)
         if not candidates:
             return RecognitionEngine._failure(ErrorCode.NO_NUMBER, transcript=transcript.text)
         return RecognitionResult(transcript.text, tuple(candidates))

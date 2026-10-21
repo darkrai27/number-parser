@@ -27,6 +27,9 @@ and ask before changing it. Specs may add detail; they may not weaken these rule
 - Return every plausible candidate, including invalid ones, with a reason.
 - "twenty five" produces both `25` (compound) and `205` (split, `20` + `5`).
 - "seven hundred twenty four" produces `724`, `70024`, and `700204`.
+- Word-derived groups are limited to three digits. `twelve hundred` → `12 100`;
+  `twenty five hundred` → `20 500`. `thousand` and larger units are rejected, not
+  ignored.
 - Whisper runs twice: default digits and a number-word prompt. Parse both transcripts and
   deduplicate by digits.
 - Deduplicate by digits only, preserving the first source fragment and discovery order.
