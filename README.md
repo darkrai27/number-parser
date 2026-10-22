@@ -14,21 +14,47 @@ and `2 10` stays `2 10`, never `200 10`.
 
 ## Setup
 
+Requires Python 3.11.x. Python 3.12 is not supported.
+
 ```bash
+python3.11 --version
 python3.11 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+python -m pip install --upgrade pip
+python -m pip install -e ".[dev]"
 ```
 
-The first real transcription downloads the `base.en` model (~150 MB). Audio decoding is
-handled by PyAV (installed with faster-whisper), so no external `ffmpeg` binary is needed.
-Live capture requires microphone permission.
+`.[dev]` installs runtime dependencies plus pytest and ruff. For runtime only:
+
+```bash
+python -m pip install -e .
+```
+
+Verify the install:
+
+```bash
+python -m main --help
+pytest
+```
+
+The first real transcription downloads `base.en` (~150 MB) to
+`~/.cache/huggingface`. Audio decoding uses PyAV, so no external `ffmpeg` binary is
+needed. Live capture prompts for microphone permission on first use; on macOS check
+System Settings → Privacy & Security → Microphone.
+
+Run the real-audio tests with:
+
+```bash
+pytest -m integration
+```
+
+They use the fixtures in `audios/examples/` and the downloaded model.
 
 ## Usage
 
 ```bash
-python -m main                 # live microphone TUI
-python -m main --file call.wav # process a file instead of the microphone
+python -m main                  # live microphone TUI
+python -m main --file audio.mp3 # process a file instead of the microphone
 python -m main --model small.en
 ```
 
