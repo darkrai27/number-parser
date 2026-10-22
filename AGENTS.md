@@ -82,7 +82,8 @@ Dependency direction: `tui → engine → audio/asr`; `numbers` imports only std
 - When a word alternative exists, parse the primary transcript with
   `digit_ambiguity=False`; the word transcript supplies split/compound variants.
 - Whisper is decoded twice: default for accurate digits, number-word prompt for grouping.
-  A digit-only prompted pass retries with greedy decoding. Parse primary and
+  Digit groups from the default pass become `hotwords` for the prompted pass; a
+  digit-only prompted pass retries with greedy decoding. Parse primary and
   `Transcript.alternatives`, then dedupe by digits.
 - Parser/validator are deterministic and pure: no I/O, clock, randomness, locale, or
   Textual imports.

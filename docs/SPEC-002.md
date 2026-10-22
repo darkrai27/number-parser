@@ -131,9 +131,11 @@ The CLI reports `Could not load speech model: {detail}` on stderr and exits with
 - RF-6: When speech ends, the engine shall transcribe it twice in English with
   faster-whisper using the configured model (default `base.en`, CPU, `int8`): once with
   default decoding and once with a number-word `initial_prompt`. The digit pass disables
-  segment timestamps: they are unused and can inject numeric artifacts. If the prompted
-  pass returns digits only, it is retried with greedy decoding to recover number words.
-  The second pass runs only if the first contains a digit or number word. Segments with
+  segment timestamps: they are unused and can inject numeric artifacts. Digit groups from
+  the first pass are converted to number words and passed as `hotwords` to the prompted
+  pass. If the prompted pass returns digits only, it is retried with greedy decoding to
+  recover number words. The second pass runs only if the first contains a digit or number
+  word. Segments with
   `no_speech_prob > 0.6`, `avg_logprob < -1.0`, or `compression_ratio > 2.4` are discarded.
   Both resulting transcripts are returned, with the word-form pass in
   `Transcript.alternatives`.
