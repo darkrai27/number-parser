@@ -62,15 +62,19 @@ Dependency direction: `tui → engine → audio/asr`; `numbers` imports only std
 
 ## Non-obvious rules
 
-- Valid Greek number = 10 national digits starting with `2` or `69`, with or without the
-  country code. Accept `0030`, `+30`, `30`, and bare numbers, but never add `0030` that
+- Valid Greek number = 10 national digits starting with `2` or `69`, with only the
+  `0030` country code or bare national form. Never add `0030` that
   was not spoken; `Output` preserves the spoken prefix.
-- "twenty five" must yield both `25` (compound) and `205` (split `20` + `5`), and
-  "seven hundred twenty four" must yield `724`, `70024`, `700204`. Never collapse
-  ambiguity; never drop invalid candidates.
-- Each word-derived group is at most 3 digits. `twelve hundred` → `12 100`; `twenty five
-  hundred` → `20 500`; never `1200`, `2500`, or `25 100`. `thousand` and larger units
+- "twenty five" must yield both `25` (compound) and `205` (split `20` + `5`); "seven
+  hundred twenty four" must yield `724`, `7204`, `70024`, `700204`; "one hundred thirty
+  six" must yield `136`, `130 6`, `100 36`, `100 30 6`. Never collapse ambiguity; never
+  drop invalid candidates.
+- Each word- or digit-derived group is at most 3 digits. `twelve hundred` → `12 100`; `twenty five
+  hundred` → `20 500`; never `1200`, `2500`, or `25 100`. A lone `2200` is rejected; only
+  `20 200` survives. `thousand` and larger units
   are rejected (`GroupTooLargeError` → `group_too_large`), not silently ignored.
+- Comma-formatted ASR numbers are one group (`1,500` is `1500`, not `1 500`). Any lone
+  digit group over 3 digits rejects that transcript; use the word transcript if it is valid.
 - Whisper is decoded twice: default for accurate digits, number-word prompt for grouping.
   Parse primary and `Transcript.alternatives`, then dedupe by digits.
 - Parser/validator are deterministic and pure: no I/O, clock, randomness, locale, or
@@ -84,6 +88,8 @@ Dependency direction: `tui → engine → audio/asr`; `numbers` imports only std
   fds_to_keep`. See `WhisperTranscriber.load()`.
 - Microphone capture is 16 kHz mono, 30 ms frames, webrtcvad mode 3. Endpointing: 3 voiced
   frames to start, 3 s silence to stop, 10 s no-speech timeout, 30 s max, 300 ms pre-roll.
+- `sounddevice.InputStream.read` has no timeout argument. Capture uses a callback queue
+  instead; `READ_TIMEOUT_S` raises `AudioReadError` when no frames arrive.
 - Whisper filters segments with `no_speech_prob > 0.6`, `avg_logprob < -1.0`, or
   `compression_ratio > 2.4`. The word-form pass runs only when the default transcript
   contains a digit or number word; empty transcripts map to `no_speech`.

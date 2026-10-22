@@ -68,6 +68,18 @@ def test_non_number_primary_skips_word_pass() -> None:
     assert len(model.calls) == 1
 
 
+def test_homophone_primary_still_runs_the_word_pass() -> None:
+    model = _FakeModel(primary=" oh oh thirty ", worded=" zero zero thirty ")
+    transcriber = WhisperTranscriber()
+    transcriber._model = model
+
+    result = transcriber.transcribe_audio(np.zeros(160, dtype=np.float32))
+
+    assert result.text == "oh oh thirty"
+    assert result.alternatives == ("zero zero thirty",)
+    assert len(model.calls) == 2
+
+
 def test_low_confidence_segment_is_dropped() -> None:
     model = _FakeModel(primary=" twenty twenty ", primary_metrics={"compression_ratio": 55.0})
     transcriber = WhisperTranscriber()

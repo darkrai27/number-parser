@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -8,9 +7,11 @@ import numpy as np
 
 from main.asr.base import TranscriptionError, UnsupportedAudioError
 from main.models import Transcript
+from main.numbers.parser import has_number
 
 if TYPE_CHECKING:
     from faster_whisper import WhisperModel
+    from faster_whisper.transcribe import TranscriptionInfo
 
 # Keep spoken numbers as words so the parser can preserve ambiguous groupings.
 _NUMBER_WORDS = (
@@ -18,8 +19,6 @@ _NUMBER_WORDS = (
     "fourteen fifteen sixteen seventeen eighteen nineteen twenty thirty forty fifty "
     "sixty seventy eighty ninety hundred thousand million billion trillion"
 )
-_NUMBER_WORDS_SET = frozenset(_NUMBER_WORDS.split())
-_WORDS = re.compile(r"[a-z0-9]+")
 _MAX_NO_SPEECH = 0.6
 _MIN_LOGPROB = -1.0
 _MAX_COMPRESSION = 2.4
@@ -61,7 +60,7 @@ class WhisperTranscriber:
             model = self._model_instance()
             primary, info = self._transcribe(model, audio, None)
             worded = ""
-            if _has_number(primary):
+            if has_number(primary):
                 worded, _ = self._transcribe(model, audio, _NUMBER_WORDS)
         except TranscriptionError:
             raise
@@ -79,8 +78,8 @@ class WhisperTranscriber:
 
     @staticmethod
     def _transcribe(
-        model: WhisperModel, audio: object, initial_prompt: str | None
-    ) -> tuple[str, object]:
+        model: WhisperModel, audio: np.ndarray, initial_prompt: str | None
+    ) -> tuple[str, TranscriptionInfo]:
         segments, info = model.transcribe(
             audio,
             language="en",
@@ -96,8 +95,3 @@ class WhisperTranscriber:
             and segment.compression_ratio <= _MAX_COMPRESSION
         ).strip()
         return text, info
-
-
-def _has_number(text: str) -> bool:
-    words = _WORDS.findall(text.lower())
-    return any(word.isdigit() or word in _NUMBER_WORDS_SET for word in words)

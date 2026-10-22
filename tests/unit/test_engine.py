@@ -74,6 +74,66 @@ def test_group_too_large_is_typed(tmp_path: Path) -> None:
     assert result.error is ErrorCode.GROUP_TOO_LARGE
 
 
+def test_grouped_primary_falls_back_to_word_transcript(tmp_path: Path) -> None:
+    transcriber = FakeTranscriber(
+        "1,500, 524",
+        alternatives=("fifteen hundred five hundred twenty four",),
+    )
+
+    result = RecognitionEngine(transcriber).recognize_file(_audio(tmp_path))
+
+    assert result.error is None
+    found = {candidate.digits for candidate in result.candidates}
+    assert "15100524" in found
+    assert "1500524" not in found
+
+
+def test_word_large_unit_rejects_even_with_digit_primary(tmp_path: Path) -> None:
+    transcriber = FakeTranscriber("1000", alternatives=("one thousand",))
+
+    result = RecognitionEngine(transcriber).recognize_file(_audio(tmp_path))
+
+    assert result.candidates == ()
+    assert result.error is ErrorCode.GROUP_TOO_LARGE
+    assert result.transcript == "one thousand"
+
+
+def test_group_too_large_in_word_pass_rejects_the_result(tmp_path: Path) -> None:
+    transcriber = FakeTranscriber(
+        "zero zero three zero two one zero one two three four five six seven",
+        alternatives=("two thousand",),
+    )
+
+    result = RecognitionEngine(transcriber).recognize_file(_audio(tmp_path))
+
+    assert result.candidates == ()
+    assert result.error is ErrorCode.GROUP_TOO_LARGE
+    assert result.transcript.startswith("zero zero three zero")
+
+
+def test_group_too_large_keeps_the_primary_transcript(tmp_path: Path) -> None:
+    transcriber = FakeTranscriber("one million", alternatives=("two thousand",))
+
+    result = RecognitionEngine(transcriber).recognize_file(_audio(tmp_path))
+
+    assert result.candidates == ()
+    assert result.error is ErrorCode.GROUP_TOO_LARGE
+    assert result.transcript == "one million"
+
+
+def test_parser_failure_stays_typed(tmp_path: Path, monkeypatch) -> None:
+    def boom(text: str) -> None:
+        raise RuntimeError("parser bug")
+
+    monkeypatch.setattr("main.engine.parse_candidates", boom)
+
+    result = RecognitionEngine(FakeTranscriber("two oh five")).recognize_file(_audio(tmp_path))
+
+    assert result.candidates == ()
+    assert result.error is ErrorCode.TRANSCRIPTION_ERROR
+    assert result.detail == "parser bug"
+
+
 def test_unsupported_file_is_typed(tmp_path: Path) -> None:
     transcriber = FailingTranscriber(UnsupportedAudioError("bad codec"))
 

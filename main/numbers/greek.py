@@ -23,17 +23,10 @@ class GreekValidation:
 def validate(raw: str) -> GreekValidation:
     """Clean a candidate and check it against the Greek numbering rules."""
     value = _SEPARATORS.sub("", raw.strip())
-    if value.startswith("+"):
-        value = value[1:]
     if not value.isdigit():
         return GreekValidation(None, Reason.NOT_DIGITS)
 
-    if value.startswith(_COUNTRY_CODE):
-        national = value[len(_COUNTRY_CODE) :]
-    elif value.startswith("30") and len(value) == 12:
-        national = value[2:]
-    else:
-        national = value
+    national = value[len(_COUNTRY_CODE) :] if value.startswith(_COUNTRY_CODE) else value
 
     if len(national) != 10:
         return GreekValidation(value, Reason.WRONG_LENGTH)

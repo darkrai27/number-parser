@@ -28,8 +28,8 @@ UI can be tested with a fake engine (no microphone, no model).
 ## Functional requirements (EARS)
 
 - RF-1: When the application starts, the system shall display a start screen with the
-  instruction "Press SPACE to start speaking", a "Start recognition" action, and a
-  "Quit" action.
+  instruction "Press SPACE to start speaking", the `Start` and `Quit` actions visible in the
+  key-binding footer, and a "Q quit" hint.
 - RF-2: When the user activates start, the system shall request the default microphone and
   enter the listening state.
 - RF-3: While listening, the system shall show a level meter, the elapsed recording time,
@@ -37,7 +37,7 @@ UI can be tested with a fake engine (no microphone, no model).
 - RF-4: While listening, the system shall update the level meter at least 10 times per
   second without blocking keyboard input.
 - RF-5: When the engine reports that speech ended, the system shall enter a processing
-  state with a spinner and the status "Transcribing…".
+  state with the status "Transcribing…".
 - RF-6: When the recognition result is available, the system shall display a table with the
   columns `#`, `Input`, `Output`, `Status`, and `Reason`.
 - RF-7: The `Input` column shall contain digits only, separated by spaces, and reflect the
@@ -71,9 +71,11 @@ UI can be tested with a fake engine (no microphone, no model).
 - Keyboard-only operation is sufficient; a mouse must not be required.
 - The layout must remain usable at 80x24 and degrade gracefully on resize.
 - Blocking work (audio, model load, transcription) must run off the Textual event loop;
-  no event handler may block for more than ~100 ms.
-- The ASR model is loaded lazily once per process; the UI shows "Loading model…" while
-  the first load happens.
+  no event handler may block for more than ~100 ms. Level/phase callbacks arrive from
+  the capture thread and must be marshaled with `call_from_thread`.
+- Logs go to stderr; stdout belongs to the TUI. No `print()` in TUI code.
+- The ASR model is loaded once by the CLI before the TUI starts (SPEC-002); the CLI reports
+  loading progress on stderr, so the TUI never waits on a first load.
 - No audio is written to disk and no network request is made at runtime after the model
   has been downloaded.
 - Startup to the start screen is under 1 second, excluding model download/load.
@@ -86,7 +88,7 @@ UI can be tested with a fake engine (no microphone, no model).
 - Silence, very short speech, clipped first word, or speech longer than 30 seconds.
 - Background noise opens the VAD but no number is spoken.
 - Multiple telephone numbers in one utterance.
-- More than 50 candidates: show the first 50 and a "+N more" note.
+- More than 50 candidates: show the first 50 and a "Showing 50 of N" note.
 - Empty, corrupt, unsupported, stereo, or non-16 kHz audio file.
 - ASR returns an empty transcript or a transcript without digits.
 - Model missing and the first download fails or is offline.
@@ -114,9 +116,13 @@ UI can be tested with a fake engine (no microphone, no model).
 
 - TUI framework: Textual (pilot tests cover the state machine).
 - Input: live microphone by default; `--file` for deterministic demos and tests.
+  There is no typed digit-sequence mode; parser strings in tests are ASR transcript
+  harnesses.
 - Ambiguity is data, not an error: every candidate is shown, valid or not.
-- Country code variants `0030`, `+30`, and `30` are accepted; a bare 10-digit national
+- Only the `0030` country code is accepted; a bare 10-digit national
   number is valid. `Output` preserves the spoken prefix and never adds a missing `0030`.
+- Valid-first table ordering is an own design choice for readability (no assignment
+  requirement); discovery order is preserved within each validity group.
 - Keyboard shortcuts: `SPACE` start/stop, `C` cancel live capture and return to the start
   screen, `R` retry, `Q` quit, `Ctrl+C` hard exit.
 

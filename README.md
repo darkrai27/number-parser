@@ -4,8 +4,8 @@ English-only terminal application that recognizes a spoken telephone number, lis
 plausible digit variant, and flags which variants are valid Greek numbers.
 
 Valid Greek numbers are 10-digit national numbers starting with `2` or `69`. The `0030`
-country code is optional; `0030`, `+30`, and `30` are accepted, and output never adds a
-prefix that was not spoken.
+country code is optional; only `0030` and bare national form are accepted, and output
+never adds a prefix that was not spoken.
 
 Spoken groups are limited to three digits: `twelve hundred` → `12 100`, `twenty five
 hundred` → `20 500`. Utterances containing `thousand` or larger units are rejected.

@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from main.models import Reason
-from main.numbers.parser import GroupTooLargeError, parse_candidates
+from main.numbers.parser import GroupTooLargeError, has_number, parse_candidates
 
 
 def digits(text: str) -> list[str]:
@@ -21,11 +21,13 @@ def digits(text: str) -> list[str]:
         ("twenty", ["20"]),
         ("my number is two oh five", ["205"]),
         ("two five and three four", ["25", "34"]),
-        ("one hundred twenty three", ["123", "10023", "100203"]),
-        ("one hundred and twenty three", ["123", "10023", "100203"]),
+        ("one hundred twenty three", ["123", "10023", "100203", "1203"]),
+        ("one hundred and twenty three", ["123", "10023", "100203", "1203"]),
         ("twelve hundred", ["12100"]),
         ("twenty five hundred", ["20500"]),
         ("twenty hundred", ["20100"]),
+        ("fifteen hundred", ["15100"]),
+        ("one five hundred", ["1500"]),
         ("too five", ["25"]),
         ("won two", ["12"]),
         ("to", []),
@@ -53,12 +55,33 @@ def test_hundred_binding_respects_three_digit_groups() -> None:
     }
 
     assert by_digits["20500"].input == "20 500"
+    assert by_digits["20500"].interpretation == "split"
     assert "2500" not in by_digits
     assert "25100" not in by_digits
 
     (twelve,) = parse_candidates("twelve hundred")
     assert twelve.digits == "12100"
     assert twelve.input == "12 100"
+
+
+def test_hundred_absorbs_tens_but_not_unit() -> None:
+    by_digits = {
+        candidate.digits: candidate for candidate in parse_candidates("one hundred thirty six")
+    }
+
+    assert set(by_digits) == {"136", "10036", "100306", "1306"}
+    assert by_digits["1306"].input == "130 6"
+    assert by_digits["10036"].input == "100 36"
+    assert by_digits["100306"].input == "100 30 6"
+
+
+def test_hundred_prefix_never_emits_a_four_digit_group() -> None:
+    candidates = parse_candidates("seven hundred twenty four hundred")
+
+    assert candidates
+    for candidate in candidates:
+        groups = candidate.input.split()
+        assert all(len(group) <= 3 for group in groups), candidate.input
 
 
 @pytest.mark.parametrize(
@@ -73,6 +96,12 @@ def test_hundred_binding_respects_three_digit_groups() -> None:
         "two billion",
         "five trillion",
         "millions",
+        "1,500",
+        "1,500, 524",
+        "2200",
+        "1500",
+        "1000",
+        "0030",
     ],
 )
 def test_large_units_are_rejected(text: str) -> None:
@@ -80,8 +109,15 @@ def test_large_units_are_rejected(text: str) -> None:
         parse_candidates(text)
 
 
+def test_twenty_two_hundred_keeps_only_split_groups() -> None:
+    (candidate,) = parse_candidates("twenty two hundred")
+
+    assert candidate.digits == "20200"
+    assert candidate.input == "20 200"
+
+
 def test_scaled_phrase_keeps_all_groupings() -> None:
-    assert set(digits("seven hundred twenty four")) == {"724", "70024", "700204"}
+    assert set(digits("seven hundred twenty four")) == {"724", "70024", "700204", "7204"}
 
 
 def test_spoken_group_variants_include_each_split() -> None:
@@ -144,3 +180,23 @@ def test_input_is_digits_with_spaces() -> None:
 
     assert candidate.digits == "210"
     assert candidate.input == "2 10"
+
+
+def test_branch_cap_bounds_candidate_count() -> None:
+    # Every "twenty five" pair doubles the ambiguity; the cap stops runaway growth.
+    assert len(parse_candidates(" ".join(["twenty five"] * 9))) == 256
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("oh oh thirty", True),
+        ("for five", True),
+        ("double five", True),
+        ("one thousand", True),
+        ("hello there", False),
+        ("", False),
+    ],
+)
+def test_has_number_matches_what_the_parser_reads(text: str, expected: bool) -> None:
+    assert has_number(text) is expected

@@ -4,6 +4,15 @@ from collections import deque
 from dataclasses import dataclass
 from enum import StrEnum
 
+SAMPLE_RATE = 16000
+FRAME_MS = 30
+_FRAME_S = FRAME_MS / 1000.0
+
+
+def _frames(seconds: float) -> int:
+    """Convert a duration in seconds to whole capture frames."""
+    return round(seconds / _FRAME_S)
+
 
 class EndReason(StrEnum):
     SILENCE = "silence"
@@ -14,10 +23,10 @@ class EndReason(StrEnum):
 @dataclass(frozen=True)
 class EndpointConfig:
     start_frames: int = 3
-    silence_frames: int = 100
-    no_speech_frames: int = 333
-    max_frames: int = 1000
-    pre_roll_frames: int = 10
+    silence_frames: int = _frames(3.0)
+    no_speech_frames: int = _frames(10.0)
+    max_frames: int = _frames(30.0)
+    pre_roll_frames: int = _frames(0.3)
 
 
 class Endpointer:

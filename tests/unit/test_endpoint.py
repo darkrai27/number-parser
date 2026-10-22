@@ -1,6 +1,13 @@
 from __future__ import annotations
 
-from main.audio.endpoint import EndpointConfig, Endpointer, EndReason
+import pytest
+
+from main.audio.endpoint import (
+    FRAME_MS,
+    EndpointConfig,
+    Endpointer,
+    EndReason,
+)
 
 CONFIG = EndpointConfig(
     start_frames=2,
@@ -13,6 +20,17 @@ CONFIG = EndpointConfig(
 
 def test_default_silence_is_three_seconds() -> None:
     assert EndpointConfig().silence_frames == 100
+
+
+def test_default_waits_are_expressed_in_seconds() -> None:
+    frame_s = FRAME_MS / 1000
+    config = EndpointConfig()
+
+    # Whole frames: the waits are within one frame of the spec durations.
+    assert config.silence_frames * frame_s == pytest.approx(3.0, abs=0.05)
+    assert config.no_speech_frames * frame_s == pytest.approx(10.0, abs=0.05)
+    assert config.max_frames * frame_s == pytest.approx(30.0, abs=0.05)
+    assert config.pre_roll_frames * frame_s == pytest.approx(0.3, abs=0.05)
 
 
 def test_start_keeps_pre_roll_and_stops_on_silence() -> None:

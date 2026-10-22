@@ -37,6 +37,8 @@ class _BlockingMic:
         self.cancelled = False
 
     def record(self, on_level: Callable[[float], None] | None = None) -> np.ndarray:
+        if on_level is not None:
+            on_level(0.5)
         self.stopped.wait(5.0)
         return np.ones(160, dtype=np.float32)
 
@@ -109,9 +111,10 @@ async def test_group_too_large_shows_error(tmp_path: Path) -> None:
     async with app.run_test(size=(100, 30)) as pilot:
         await _paused(pilot)
 
-        assert "Number groups may have at most three digits" in str(
-            app.query_one("#status", Static).content
-        )
+        status = str(app.query_one("#status", Static).content)
+        assert "Number groups may have at most three digits" in status
+        assert "one thousand" in status
+        assert "R retry | Q quit" in status
         assert not app.query_one(DataTable).display
 
 
@@ -185,7 +188,38 @@ async def test_no_number_hides_table(tmp_path: Path) -> None:
         await _paused(pilot)
 
         assert not app.query_one(DataTable).display
-        assert "No telephone number recognized." in str(app.query_one("#status", Static).content)
+        status = str(app.query_one("#status", Static).content)
+        assert "No telephone number recognized." in status
+        assert 'Transcript: "hello there"' in status
+        assert "R retry | Q quit" in status
+
+
+async def test_more_than_fifty_candidates_notes_the_total(tmp_path: Path) -> None:
+    transcript = " ".join(["twenty five"] * 7)  # 2**7 candidates
+    app = RecognitionApp(RecognitionEngine(FakeTranscriber(transcript)), str(_audio(tmp_path)))
+
+    async with app.run_test(size=(100, 30)) as pilot:
+        await _paused(pilot)
+
+        assert app.query_one(DataTable).row_count == 50
+        assert "Showing 50 of 128" in str(app.query_one("#status", Static).content)
+
+
+async def test_listening_shows_level_meter_and_elapsed() -> None:
+    app = RecognitionApp(RecognitionEngine(FakeTranscriber("two oh five"), _BlockingMic()))
+
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.press("space")
+        await _wait_for_status(pilot, "Listening…")
+        await pilot.pause(0.2)
+
+        status = str(app.query_one("#status", Static).content)
+        assert "Listening…" in status
+        assert "█" in status
+        assert "SPACE stop | C cancel | Q quit" in status
+
+        await pilot.press("space")
+        await _paused(pilot)
 
 
 async def test_space_starts_microphone_flow() -> None:

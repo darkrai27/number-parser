@@ -69,7 +69,7 @@ _LARGE_UNITS = frozenset(
         "quadrillions",
     }
 )
-_WORDS = re.compile(r"[a-z0-9]+")
+_WORDS = re.compile(r"[a-z]+|\d[\d,]*")
 _MAX_STATES = 256  # ponytail: hard cap on ambiguity branches; revisit if real input overflows
 
 
@@ -84,11 +84,14 @@ class _Token:
     value: int
     homophone: bool = False
     weak: bool = False
+    grouped: bool = False
 
 
 def _token(word: str) -> _Token | None:
-    if word.isdigit():
-        return _Token(word, "digits", int(word))
+    if word[0].isdigit():
+        raw = word.rstrip(",")
+        digits = raw.replace(",", "")
+        return _Token(digits, "digits", int(digits), grouped="," in raw)
     if word in _LARGE_UNITS:
         return _Token(word, "large", 0)
     if word in _UNITS:
@@ -225,7 +228,31 @@ def _hundred(
         )
         for part in remainder.variants
     )
+
+    split = _split_unit(remainder)
+    if split is not None:
+        unit = int(split.text.split()[-1])
+        tens_digits = split.digits[: -len(str(unit))]
+        partial = base + int(tens_digits)
+        variants.append(
+            _Variant(
+                f"{lead_digits}{partial}{unit}",
+                joined(lead_text, str(partial), str(unit)),
+                flags | split.flags | {"split"},
+            )
+        )
     return tuple(variants)
+
+
+def _split_unit(prefix: _Parsed) -> _Variant | None:
+    """Pick a tens+unit split variant; its last group must be a single unit digit."""
+    for variant in prefix.variants:
+        if "split" not in variant.flags:
+            continue
+        unit = int(variant.text.split()[-1])
+        if 0 <= unit <= 9:
+            return variant
+    return None
 
 
 def _scale(tokens: list[_Token], index: int, prefix: _Parsed | None) -> _Parsed:
@@ -253,13 +280,19 @@ def _scale(tokens: list[_Token], index: int, prefix: _Parsed | None) -> _Parsed:
         value = prefix.value * token.value + (remainder.value if remainder is not None else 0)
         return _Parsed(value, variants, next_index)
 
-    split = next((variant for variant in prefix.variants if "split" in variant.flags), None)
+    split = _split_unit(prefix)
     if split is not None:
         chunks = split.text.split()
         unit = int(chunks[-1])
         lead_text = " ".join(chunks[:-1])
         lead_digits = split.digits[: -len(str(unit))]
-        variants = _hundred(lead_text, lead_digits, unit * 100, remainder, prefix_flags)
+        variants = _hundred(
+            lead_text,
+            lead_digits,
+            unit * 100,
+            remainder,
+            prefix_flags | {"split"},
+        )
         value = unit * 100 + (remainder.value if remainder is not None else 0)
         return _Parsed(value, variants, next_index)
 
@@ -307,10 +340,19 @@ def _interpretation(flags: frozenset[str]) -> str:
     return "direct"
 
 
+def has_number(text: str) -> bool:
+    """Return True when the text contains anything the parser can turn into digits."""
+    return any(token is not None for token in _tokenize(text))
+
+
 def parse_candidates(text: str) -> tuple[Candidate, ...]:
     """Extract every plausible digit sequence from an English transcript."""
     tokens = _tokenize(text)
-    if any(token is not None and token.kind == "large" for token in tokens):
+    if any(
+        token is not None
+        and (token.kind == "large" or (token.kind == "digits" and len(token.text) > 3))
+        for token in tokens
+    ):
         raise GroupTooLargeError
 
     runs: list[list[_Token]] = []

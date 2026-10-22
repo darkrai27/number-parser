@@ -4,9 +4,9 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol
 
-from main.asr.base import Transcriber, TranscriptionError, UnsupportedAudioError
+from main.asr.base import Transcriber, UnsupportedAudioError
 from main.audio.microphone import AudioReadError, CaptureCancelled, Microphone, NoInputDeviceError
-from main.models import ErrorCode, RecognitionResult, Transcript
+from main.models import Candidate, ErrorCode, RecognitionResult, Transcript
 from main.numbers.parser import GroupTooLargeError, parse_candidates
 
 
@@ -46,8 +46,6 @@ class RecognitionEngine:
             transcript = self._transcriber.transcribe_file(source)
         except UnsupportedAudioError as exc:
             return self._failure(ErrorCode.UNSUPPORTED_FILE, str(exc))
-        except TranscriptionError as exc:
-            return self._failure(ErrorCode.TRANSCRIPTION_ERROR, str(exc))
         except Exception as exc:
             return self._failure(ErrorCode.TRANSCRIPTION_ERROR, str(exc))
         return self._result(transcript)
@@ -77,8 +75,6 @@ class RecognitionEngine:
             on_phase("transcribing")
         try:
             transcript = self._transcriber.transcribe_audio(audio)
-        except TranscriptionError as exc:
-            return self._failure(ErrorCode.TRANSCRIPTION_ERROR, str(exc))
         except Exception as exc:
             return self._failure(ErrorCode.TRANSCRIPTION_ERROR, str(exc))
         return self._result(transcript)
@@ -91,15 +87,32 @@ class RecognitionEngine:
     def _result(transcript: Transcript) -> RecognitionResult:
         if not transcript.text and not transcript.alternatives:
             return RecognitionEngine._failure(ErrorCode.NO_SPEECH)
-        candidates = []
+        candidates: list[Candidate] = []
         seen: set[str] = set()
+        primary_group_error = False
         try:
-            for text in (transcript.text, *transcript.alternatives):
-                for candidate in parse_candidates(text):
+            for index, text in enumerate((transcript.text, *transcript.alternatives)):
+                try:
+                    parsed = parse_candidates(text)
+                except GroupTooLargeError:
+                    if index > 0:
+                        diagnostic = (
+                            text
+                            if not any(character.isalpha() for character in transcript.text)
+                            else transcript.text
+                        )
+                        return RecognitionEngine._failure(
+                            ErrorCode.GROUP_TOO_LARGE, transcript=diagnostic
+                        )
+                    primary_group_error = True
+                    continue
+                for candidate in parsed:
                     if candidate.digits not in seen:
                         seen.add(candidate.digits)
                         candidates.append(candidate)
-        except GroupTooLargeError:
+        except Exception as exc:
+            return RecognitionEngine._failure(ErrorCode.TRANSCRIPTION_ERROR, str(exc))
+        if not candidates and primary_group_error:
             return RecognitionEngine._failure(ErrorCode.GROUP_TOO_LARGE, transcript=transcript.text)
         if not candidates:
             return RecognitionEngine._failure(ErrorCode.NO_NUMBER, transcript=transcript.text)

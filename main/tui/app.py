@@ -123,8 +123,6 @@ class RecognitionApp(App[None]):
         self._set_status("Transcribing…")
         try:
             result = await asyncio.to_thread(self.engine.recognize_file, self.file_path)
-        except Exception as exc:
-            result = RecognitionResult("", (), ErrorCode.TRANSCRIPTION_ERROR, str(exc))
         finally:
             self._busy = False
         self._show(result)
@@ -134,13 +132,11 @@ class RecognitionApp(App[None]):
         self._listening_started = time.monotonic()
         self._last_level = 0.0
         self._set_status("Listening…")
-        self._timer = self.set_interval(0.1, self._tick)
+        self._timer = self.set_interval(0.05, self._tick)
         try:
             result = await asyncio.to_thread(
                 self.engine.recognize_microphone, self._on_level, self._on_phase
             )
-        except Exception as exc:
-            result = RecognitionResult("", (), ErrorCode.TRANSCRIPTION_ERROR, str(exc))
         finally:
             if self._timer is not None:
                 self._timer.stop()
@@ -151,8 +147,6 @@ class RecognitionApp(App[None]):
 
     def _on_level(self, level: float) -> None:
         self._last_level = level
-        with contextlib.suppress(RuntimeError):
-            self.call_from_thread(self._tick)
 
     def _on_phase(self, phase: str) -> None:
         if phase == "transcribing":
@@ -180,7 +174,10 @@ class RecognitionApp(App[None]):
                 self._set_status(_START_MESSAGE)
             return
         if result.error:
-            self._set_status(f"{format_error(result.error, result.detail)}\n\nR retry | Q quit")
+            message = format_error(result.error, result.detail)
+            if result.transcript:
+                message += f'\nTranscript: "{result.transcript}"'
+            self._set_status(f"{message}\n\nR retry | Q quit")
             return
 
         table = self.query_one(DataTable)

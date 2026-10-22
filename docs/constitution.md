@@ -7,6 +7,8 @@ and ask before changing it. Specs may add detail; they may not weaken these rule
 
 - English speech only. The application and its UI are English only.
 - The only domain is telephone-number recognition and Greek-number validation.
+- Input is spoken English via microphone or audio file; parser strings in tests are
+  ASR transcript harnesses, not a typed-input mode.
 - No telephony integration, dialing, recording history, or cloud services.
 
 ## 2. Architecture boundaries
@@ -26,10 +28,11 @@ and ask before changing it. Specs may add detail; they may not weaken these rule
 - Never silently pick one interpretation of an utterance.
 - Return every plausible candidate, including invalid ones, with a reason.
 - "twenty five" produces both `25` (compound) and `205` (split, `20` + `5`).
-- "seven hundred twenty four" produces `724`, `70024`, and `700204`.
-- Word-derived groups are limited to three digits. `twelve hundred` → `12 100`;
-  `twenty five hundred` → `20 500`. `thousand` and larger units are rejected, not
-  ignored.
+- "seven hundred twenty four" produces `724`, `7204`, `70024`, and `700204`.
+- "one hundred thirty six" produces `136`, `130 6`, `100 36`, and `100 30 6`.
+- Each word- or digit-derived group is limited to three digits. `twelve hundred` → `12 100`;
+  `twenty five hundred` → `20 500`; a lone `2200` is rejected, only `20 200` survives.
+  `thousand` and larger units are rejected, not ignored.
 - Whisper runs twice: default digits and a number-word prompt. Parse both transcripts and
   deduplicate by digits.
 - Deduplicate by digits only, preserving the first source fragment and discovery order.
@@ -38,7 +41,7 @@ and ask before changing it. Specs may add detail; they may not weaken these rule
 
 - Canonical Greek form: `0030` + 10 national digits.
 - National number is valid only if it starts with `2` or `69`.
-- Accept `0030`, `+30`, `30`, and bare 10-digit national numbers; output preserves the
+- Accept only `0030` and bare 10-digit national numbers; output preserves the
   spoken prefix and never adds `0030` when it was absent.
 - Do not invent a country code or pad/truncate digits to make a number valid.
 
@@ -58,7 +61,8 @@ and ask before changing it. Specs may add detail; they may not weaken these rule
 ## 7. UX
 
 - English-only copy, no tracebacks, and every error says what the user can do next.
-- Keyboard-only operation; `SPACE` start/stop, `R` retry, `Q` quit, `Ctrl+C` clean exit.
+- Keyboard-only operation; `SPACE` start/stop, `C` cancel live capture, `R` retry,
+  `Q` quit, `Ctrl+C` clean exit.
 - Live feedback is required while listening and while transcribing.
 - At least 80x24 terminals must remain usable.
 

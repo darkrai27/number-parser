@@ -15,8 +15,8 @@ example `2 10 69 30 6 6 4`); the candidate is the concatenation of those numbers
 Different groupings and ASR noise make several readings plausible. The engine must
 preserve ambiguity instead of silently choosing one interpretation. For example,
 "twenty five" can be heard as `25` (compound) or `20 5` → `205` (split), and
-"seven hundred twenty four" as `724`, `70024`, or `700204`. All are candidates and all
-are displayed. Only candidates that normalize to `0030` + a valid 10-digit Greek
+"seven hundred twenty four" as `724`, `7204`, `70024`, or `700204`. All are candidates
+and all are displayed. Only candidates that normalize to `0030` + a valid 10-digit Greek
 national number are marked valid.
 
 Whisper often normalizes spoken numbers to digits (`0-0-30-69-724-1352`), destroying the
@@ -90,6 +90,7 @@ class ErrorCode(StrEnum):
     CANCELLED = "cancelled"
     TRANSCRIPTION_ERROR = "transcription_error"
     NO_NUMBER = "no_number"
+    GROUP_TOO_LARGE = "group_too_large"
 ```
 
 `detail` carries the failing path or exception message for diagnostics. The TUI owns the
@@ -103,10 +104,11 @@ user-facing copy; the engine never returns presentation prose.
 | `unsupported_file` | The audio file cannot be decoded. |
 | `no_input_device` | No default input device, or the device cannot be opened. |
 | `audio_read_error` | The microphone stream fails while capturing. |
-| `no_speech` | Capture ended with no samples to transcribe. |
+| `no_speech` | Capture ended with no samples, or all transcripts are empty. |
 | `cancelled` | The user cancelled capture with `C`; buffered audio is discarded. |
 | `transcription_error` | Model inference or transcript processing fails. |
-| `no_number` | The transcript contains no digits or number words. |
+| `no_number` | Transcripts are non-empty but contain no digits or number words. |
+| `group_too_large` | The utterance contains `thousand` or a larger scale word, or a lone digit group over three digits. |
 
 Model loading is a CLI startup step, not an engine call, so it is not an `ErrorCode`.
 The CLI reports `Could not load speech model: {detail}` on stderr and exits with status 1.
@@ -114,9 +116,12 @@ The CLI reports `Could not load speech model: {detail}` on stderr and exits with
 ## Functional requirements (EARS)
 
 - RF-1: When recognition starts, the engine shall capture mono 16 kHz audio from the
-  default input device, or decode `--file PATH` when supplied.
-- RF-2: While capturing, the engine shall classify 20–30 ms frames with a VAD and shall
-  consider speech started after three consecutive voiced frames.
+  default input device, or decode `--file PATH` when supplied. Microphone capture
+  uses a `sounddevice` callback queue (`InputStream.read` has no timeout argument);
+  when no frames arrive within `READ_TIMEOUT_S`, the engine returns `audio_read_error`.
+- RF-2: While capturing, the engine shall classify 30 ms frames with a VAD (mode 3)
+  and shall consider speech started after three consecutive voiced frames. The
+  endpointing keeps 300 ms of pre-roll audio before speech onset.
 - RF-3: When 3.0 seconds of silence follows speech, the engine shall stop capturing and
   process the buffered speech.
 - RF-4: If no speech is detected within 10 seconds, the engine shall stop and return a
@@ -141,29 +146,34 @@ The CLI reports `Could not load speech model: {detail}` on stderr and exits with
   `25` and `205`).
 - RF-10: When a hundreds phrase cannot form a group of at most three digits, the parser
   shall keep the prefix and `100` as separate groups (`twelve hundred` → `12 100`,
-  `twenty five hundred` → `20 500`). When it can, compound and split candidates are
-  emitted (`seven hundred twenty four` → `724`, `70024`, `700204`).
+  `twenty five hundred` → `20 500`). When it can, compound, partial, and split candidates
+  are emitted (`one hundred thirty six` → `136`, `130 6`, `100 36`, `100 30 6`;
+  `seven hundred twenty four` → `724`, `7204`, `70024`, `700204`).
 - RF-10a: If an utterance contains `thousand` or a larger unit (`million`, `billion`,
-  `trillion`, ...), the parser shall raise `GroupTooLargeError`; the engine shall return
-  `group_too_large`.
+  `trillion`, ...), or a lone digit group longer than three digits (`2200`, `1500`,
+  `0030` as one token), the parser shall raise `GroupTooLargeError`; the engine shall
+  return `group_too_large` and keep the primary transcript in the result.
 - RF-11: The parser shall deduplicate candidates by digits across all transcripts, keep
   the first source fragment, and never discard a candidate because it is invalid.
-- RF-12: If no transcript contains digits, the engine shall return a `no_number` result
-  with the primary transcript and an empty candidate list.
-- RF-13: The validator shall normalize separators and the optional country-code variants
-  `0030`, `+30`, and `30` to `0030` + national number; a bare 10-digit national number
-  is accepted.
+- RF-12: If the primary transcript and all alternatives are empty, the engine shall
+  return a `no_speech` result. If transcripts are non-empty but contain no digits or
+  number words, the engine shall return a `no_number` result with the primary
+  transcript and an empty candidate list.
+- RF-13: The validator shall normalize separators and strip only the `0030`
+  country-code prefix; a bare 10-digit national number is accepted. `+30` and `30`
+  forms are not accepted (`+30` fails as `not_digits`; a 12-digit `30` form fails as
+  `wrong_length`).
 - RF-14: The validator shall mark a candidate valid when the national number is exactly
   10 digits and starts with `2` or `69`, whether or not the country code was spoken.
 - RF-15: The validator shall mark every other candidate invalid with a specific reason:
   `wrong_length`, `wrong_prefix`, or `not_digits`.
 - RF-16: If audio input, decoding, or transcription fails, the engine shall return a
   `RecognitionResult` carrying an `ErrorCode` (`file_not_found`, `unsupported_file`,
-  `no_input_device`, `audio_read_error`, `transcription_error`, or
-  `group_too_large`) and a diagnostic `detail` instead of raising into the TUI. Silence,
-  user cancellation, and an empty candidate set are typed outcomes (`no_speech`,
-  `cancelled`, `no_number`), not exceptions. Model loading happens in the CLI before the
-  TUI starts; a load failure is reported to stderr and exits with status 1.
+  `no_input_device`, `audio_read_error`, `transcription_error`, or `group_too_large`) and a
+  diagnostic `detail` instead of raising into the TUI. Silence, user cancellation, and an
+  empty candidate set are typed outcomes (`no_speech`, `cancelled`, `no_number`), not
+  exceptions. Model loading happens in the CLI before the TUI starts; a load failure is
+  reported to stderr and exits with status 1.
 
 ## Parsing rules
 
@@ -180,9 +190,16 @@ The CLI reports `Could not load speech model: {detail}` on stderr and exits with
 - Otherwise the prefix and `100` stay separate: `twelve hundred` → `12 100` (`12100`),
   never `1200`.
 - Remainders still produce compound and split variants when they fit:
-  `seven hundred twenty four` → `724`, `70024`, `700204`.
+  `seven hundred twenty four` → `724`, `7204`, `70024`, `700204`.
+- A tens+unit remainder also emits a partial-absorption variant where `hundred` absorbs
+  the tens and the unit stays separate: `one hundred thirty six` → `136`, `130 6`,
+  `100 36`, `100 30 6`.
 - `thousand` and larger units (`million`, `billion`, `trillion`, ...) are rejected:
   they cannot form a group of at most three digits.
+- Comma-formatted ASR numbers are one group: `1,500, 524` is `1500` + `524`, not
+  `1 500 524`. Any lone digit group over three digits (`2200`, `1,500`) rejects that
+  transcript; a valid word transcript can still supply candidates. A large scale word
+  in the word transcript rejects the whole result.
 - Candidates are generated by composing every item variant across the utterance, then
   deduplicating by digits. The branch count is capped at 256.
 - Dual transcripts are parsed independently and unioned; the default transcript is shown
@@ -200,12 +217,10 @@ The CLI reports `Could not load speech model: {detail}` on stderr and exits with
 ## Greek validation rules
 
 ```
-input: 0030 2101234567 / +30 2101234567 / 30 2101234567 / 2101234567
+input: 0030 2101234567 / 2101234567
 strip: spaces, "-", ".", "(", ")", "/"
 prefix:
   "0030"              -> national = rest
-  "+30"               -> national = rest
-  "30" (total 12)     -> national = rest
   otherwise           -> national = whole input
 valid national: ^(2\d{9}|69\d{8})$
 output: cleaned input digits, preserving the spoken prefix
@@ -235,7 +250,7 @@ lengths. A country code followed by anything other than 10 digits is invalid
 - Silence, noise-only input, clipped start, very long silence, speech over 30 seconds.
 - Background noise that opens the VAD but contains no number.
 - Multiple numbers in one utterance.
-- `0030` spoken as words, `+30`, `30`, or omitted entirely.
+- `0030` spoken as words or omitted entirely (`+30`/`30` forms are invalid).
 - Leading zeros, repeated digits, `double oh`, `triple zero`.
 - More or fewer than 10 national digits; national numbers starting with `1`, `69`, `2`.
 - ASR homophones and word-boundary errors (`twenty five` vs `twenty-five`).
@@ -260,8 +275,10 @@ lengths. A country code followed by anything other than 10 digits is invalid
 
 - Table-driven parser tests cover units, teens, tens, hundreds, `double`/`triple`,
   homophones, country-code variants, multiple numbers, tens+unit ambiguity,
-  hundred-group ambiguity, and the three-digit group limit.
-- `thousand` and larger units are rejected with `group_too_large` and a TUI error message.
+  hundred-group ambiguity, partial hundred absorption, comma-formatted numbers, and the
+  three-digit group limit.
+- `thousand` and larger units are rejected with `group_too_large` and a TUI error message
+  that shows the transcript.
 - Validator tests cover every reason code and the `2` / `69` prefix rule.
 - Engine tests use fake transcripts and typed failures, including `Transcript.alternatives`;
   every `ErrorCode` is asserted; no microphone or model download.
@@ -276,17 +293,17 @@ lengths. A country code followed by anything other than 10 digits is invalid
   `initial_prompt` for grouping — but the word pass runs only when the default transcript
   contains a number. Low-confidence segments are filtered to prevent silence/noise
   hallucinations.
-- VAD: `webrtcvad` mode 3 frame classification with 3-second silence endpointing and a
-  10-second no-speech timeout.
+- VAD: `webrtcvad` mode 3 frame classification (30 ms frames) with 3-second silence
+  endpointing, 300 ms pre-roll, and a 10-second no-speech timeout.
 - Audio: live microphone by default; `--file` bypasses capture.
 - Cancellation: `C` stops a live capture, discards buffered audio, and returns to the
   start screen without exiting; cancellation is a typed `cancelled` outcome.
 - Ambiguity: emit compound and split interpretations for tens+unit and hundreds, plus
   homophones; never silently coerce to one answer.
-- Group size: each word-derived group is at most three digits. Hundreds that would
-  overflow are split; `thousand` and larger units are rejected as `group_too_large`.
-- Validation: country-code variants are accepted; a bare 10-digit national number is
-  valid. Output preserves the spoken prefix and never adds `0030`.
+- Group size: each word- or digit-derived group is at most three digits. Hundreds that would
+  overflow are split; a lone `2200` is rejected in favor of `20 200`; `thousand` and larger units are rejected as `group_too_large`.
+- Validation: only the `0030` country code is accepted; a bare 10-digit national
+  number is valid. Output preserves the spoken prefix and never adds `0030`.
 
 ## Open questions
 

@@ -10,8 +10,8 @@ from main.numbers.greek import validate
     ("raw", "output", "reason"),
     [
         ("00302101234567", "00302101234567", Reason.VALID),
-        ("+30 210 123 4567", "302101234567", Reason.VALID),
-        ("30-210-123-4567", "302101234567", Reason.VALID),
+        ("+30 210 123 4567", None, Reason.NOT_DIGITS),
+        ("30-210-123-4567", "302101234567", Reason.WRONG_LENGTH),
         ("0030 691 234 5678", "00306912345678", Reason.VALID),
         ("2101234567", "2101234567", Reason.VALID),
         ("6912345678", "6912345678", Reason.VALID),

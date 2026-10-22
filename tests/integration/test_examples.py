@@ -19,6 +19,7 @@ KNOWN_MISRECOGNIZED = {
 GROUP_TOO_LARGE = {
     "1000023.mp3",
     "1024-125000.mp3",
+    "1025-125000.mp3",
     "33000-20-453.mp3",
 }
 
@@ -33,6 +34,9 @@ _ENGINE = RecognitionEngine(WhisperTranscriber())
 
 
 def expected_digits(path: Path) -> str:
+    overrides = {"1500-524.mp3": "15100524"}
+    if path.name in overrides:
+        return overrides[path.name]
     return path.stem.replace("(v2)", "").replace("-", "")
 
 
