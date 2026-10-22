@@ -29,7 +29,7 @@ UI can be tested with a fake engine (no microphone, no model).
 
 - RF-1: When the application starts, the system shall display a start screen with the
   instruction "Press SPACE to start speaking", the `Start` and `Quit` actions visible in the
-  key-binding footer, and a "Q quit" hint.
+  screen, and a "Q quit" hint.
 - RF-2: When the user activates start, the system shall request the default microphone and
   enter the listening state.
 - RF-3: While listening, the system shall show a level meter, the elapsed recording time,

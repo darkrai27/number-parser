@@ -75,8 +75,15 @@ Dependency direction: `tui → engine → audio/asr`; `numbers` imports only std
   are rejected (`GroupTooLargeError` → `group_too_large`), not silently ignored.
 - Comma-formatted ASR numbers are one group (`1,500` is `1500`, not `1 500`). Any lone
   digit group over 3 digits rejects that transcript; use the word transcript if it is valid.
+- Digit sequences carry the assignment's advanced ambiguity: `69` → `69`/`609`,
+  `75` → `75`/`705`, `20 5` → `205`/`25`, `30 6` → `306`/`36`, `700 24` →
+  `70024`/`724` plus `724`'s split groupings. A lone 3-digit digit group is not split.
+  `2 10` is always `2 10` (`210`), never `200 10`.
+- When a word alternative exists, parse the primary transcript with
+  `digit_ambiguity=False`; the word transcript supplies split/compound variants.
 - Whisper is decoded twice: default for accurate digits, number-word prompt for grouping.
-  Parse primary and `Transcript.alternatives`, then dedupe by digits.
+  A digit-only prompted pass retries with greedy decoding. Parse primary and
+  `Transcript.alternatives`, then dedupe by digits.
 - Parser/validator are deterministic and pure: no I/O, clock, randomness, locale, or
   Textual imports.
 - Unit tests must not touch a mic, model, network, or real audio. Fake the boundaries;

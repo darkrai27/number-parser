@@ -9,6 +9,8 @@ never adds a prefix that was not spoken.
 
 Spoken groups are limited to three digits: `twelve hundred` → `12 100`, `twenty five
 hundred` → `20 500`. Utterances containing `thousand` or larger units are rejected.
+Digit sequences keep the same ambiguity: `69` → `69` / `609`, `20 5` → `205` / `25`,
+and `2 10` stays `2 10`, never `200 10`.
 
 ## Setup
 

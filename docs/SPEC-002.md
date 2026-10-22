@@ -19,7 +19,7 @@ preserve ambiguity instead of silently choosing one interpretation. For example,
 and all are displayed. Only candidates that normalize to `0030` + a valid 10-digit Greek
 national number are marked valid.
 
-Whisper often normalizes spoken numbers to digits (`0-0-30-69-724-1352`), destroying the
+Whisper often normalizes spoken numbers to digits (`0-0-30-69-724-13-52`), destroying the
 grouping evidence. The adapter therefore performs two decodes: one default pass for the
 most accurate digit string, and one pass with a number-word prompt to recover the spoken
 words. Candidates from both transcripts are unioned.
@@ -130,8 +130,10 @@ The CLI reports `Could not load speech model: {detail}` on stderr and exits with
   captured.
 - RF-6: When speech ends, the engine shall transcribe it twice in English with
   faster-whisper using the configured model (default `base.en`, CPU, `int8`): once with
-  default decoding and once with a number-word `initial_prompt`. The second pass runs
-  only if the first contains a digit or number word. Segments with
+  default decoding and once with a number-word `initial_prompt`. The digit pass disables
+  segment timestamps: they are unused and can inject numeric artifacts. If the prompted
+  pass returns digits only, it is retried with greedy decoding to recover number words.
+  The second pass runs only if the first contains a digit or number word. Segments with
   `no_speech_prob > 0.6`, `avg_logprob < -1.0`, or `compression_ratio > 2.4` are discarded.
   Both resulting transcripts are returned, with the word-form pass in
   `Transcript.alternatives`.
@@ -144,6 +146,11 @@ The CLI reports `Could not load speech model: {detail}` on stderr and exits with
 - RF-9: When a tens word is immediately followed by a unit word, the parser shall emit
   both the compound candidate and the split candidate (for example "twenty five" →
   `25` and `205`).
+- RF-9a: The parser shall emit the same ambiguity for digit sequences: a two-digit group
+  splits (`69` → `69` and `609`; `75` → `75` and `705`), and adjacent groups combine
+  when the result is a natural number (`20 5` → `205` and `25`; `30 6` → `306` and
+  `36`; `700 24` → `70024` and `724`). Unit + teen groups stay separate: `2 10` is
+  always `2 10` (`210`), never `200 10`. A lone three-digit group stays one group.
 - RF-10: When a hundreds phrase cannot form a group of at most three digits, the parser
   shall keep the prefix and `100` as separate groups (`twelve hundred` → `12 100`,
   `twenty five hundred` → `20 500`). When it can, compound, partial, and split candidates
@@ -154,7 +161,10 @@ The CLI reports `Could not load speech model: {detail}` on stderr and exits with
   `0030` as one token), the parser shall raise `GroupTooLargeError`; the engine shall
   return `group_too_large` and keep the primary transcript in the result.
 - RF-11: The parser shall deduplicate candidates by digits across all transcripts, keep
-  the first source fragment, and never discard a candidate because it is invalid.
+  the first source fragment, and never discard a candidate because it is invalid. When a
+  word-form alternative exists, the engine parses the primary transcript without digit
+  ambiguity, so the word transcript supplies the authoritative grouping without adding
+  duplicate digit-level variants.
 - RF-12: If the primary transcript and all alternatives are empty, the engine shall
   return a `no_speech` result. If transcripts are non-empty but contain no digits or
   number words, the engine shall return a `no_number` result with the primary
@@ -182,7 +192,13 @@ The CLI reports `Could not load speech model: {detail}` on stderr and exits with
 - Adjacent groups are concatenated: `two five` → 25, `zero zero three zero` → 0030.
 - The tens+unit rule (RF-9) emits both compound and split forms for every adjacent pair,
   including inside larger phrases: `sixty nine` → `69`, `609`.
-- Each word-derived group is limited to three digits.
+- Digit groups follow the same ambiguity rules (RF-9a): `69` → `69`/`609`,
+  `75` → `75`/`705`, `20 5` → `205`/`25`, `30 6` → `306`/`36`,
+  `700 24` → `70024`/`724` plus the split groupings of `724`.
+- Unit + teen groups never combine: `2 10` → `2 10` (`210`), never `200 10`.
+- A lone three-digit digit group is not split; the word transcript supplies its
+  compound and split groupings when the speaker used number words.
+- Each word- or digit-derived group is limited to three digits.
 - The hundreds rule (RF-10) binds `hundred` to the preceding number when the product is
   at most 999: `seven hundred` → `700`.
 - If the prefix is a tens+unit pair and the product would exceed 999, `hundred` binds to
@@ -275,8 +291,9 @@ lengths. A country code followed by anything other than 10 digits is invalid
 
 - Table-driven parser tests cover units, teens, tens, hundreds, `double`/`triple`,
   homophones, country-code variants, multiple numbers, tens+unit ambiguity,
-  hundred-group ambiguity, partial hundred absorption, comma-formatted numbers, and the
-  three-digit group limit.
+  hundred-group ambiguity, partial hundred absorption, comma-formatted numbers, the
+  three-digit group limit, the assignment's digit-sequence examples, and the
+  `2 10` → only `2 10` invariant.
 - `thousand` and larger units are rejected with `group_too_large` and a TUI error message
   that shows the transcript.
 - Validator tests cover every reason code and the `2` / `69` prefix rule.
@@ -291,15 +308,19 @@ lengths. A country code followed by anything other than 10 digits is invalid
 - STT: faster-whisper, local, `base.en` default, CPU `int8`.
 - ASR ambiguity: two decodes per file — default for accurate digits, number-word
   `initial_prompt` for grouping — but the word pass runs only when the default transcript
-  contains a number. Low-confidence segments are filtered to prevent silence/noise
-  hallucinations.
+  contains a number. A digit-only word pass retries with greedy decoding. Low-confidence
+  segments are filtered to prevent silence/noise hallucinations.
 - VAD: `webrtcvad` mode 3 frame classification (30 ms frames) with 3-second silence
   endpointing, 300 ms pre-roll, and a 10-second no-speech timeout.
 - Audio: live microphone by default; `--file` bypasses capture.
 - Cancellation: `C` stops a live capture, discards buffered audio, and returns to the
   start screen without exiting; cancellation is a typed `cancelled` outcome.
 - Ambiguity: emit compound and split interpretations for tens+unit and hundreds, plus
-  homophones; never silently coerce to one answer.
+  homophones; apply the same rules to digit sequences when no word transcript is
+  available; never silently coerce to one answer.
+- Word-form precedence: when both transcripts exist, the primary digit transcript keeps
+  its direct grouping and the word transcript supplies the split/compound alternatives.
+  This avoids digit-level variants that contradict the spoken words.
 - Group size: each word- or digit-derived group is at most three digits. Hundreds that would
   overflow are split; a lone `2200` is rejected in favor of `20 200`; `thousand` and larger units are rejected as `group_too_large`.
 - Validation: only the `0030` country code is accepted; a bare 10-digit national
