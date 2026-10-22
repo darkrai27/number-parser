@@ -43,7 +43,7 @@ DOCUMENTED_CASES: dict[str, frozenset[str]] = {
     ),
     "2-10-69-30-6-60-4.mp3": frozenset(
         {
-            "210 69 36 64",
+            "2 10 69 36 64",
             "2 10 69 36 60 4",
             "2 10 69 30 6 64",
             "2 10 69 30 6 60 4",
@@ -183,9 +183,6 @@ DOCUMENTED_CASES: dict[str, frozenset[str]] = {
     ),
 }
 
-KNOWN_ASR_ISSUES = {
-    "2-10-69-30-6-60-4.mp3": "base.en hears 'sixty' as 'sixteen' and merges groups",
-}
 GROUP_TOO_LARGE = {
     "1000023.mp3",
     "1025-125000.mp3",
@@ -215,14 +212,7 @@ def _assert_candidate_contract(candidates: tuple[Candidate, ...]) -> None:
 
 
 def _params() -> list[pytest.ParameterSet]:
-    params = []
-    for path in FIXTURES:
-        marks = []
-        reason = KNOWN_ASR_ISSUES.get(path.name)
-        if reason is not None:
-            marks.append(pytest.mark.xfail(strict=True, reason=reason))
-        params.append(pytest.param(path, marks=marks, id=path.name))
-    return params
+    return [pytest.param(path, id=path.name) for path in FIXTURES]
 
 
 def test_every_fixture_has_expectations() -> None:

@@ -91,6 +91,22 @@ def test_homophone_primary_still_runs_the_word_pass() -> None:
     assert len(model.calls) == 2
 
 
+def test_word_pass_gets_hotwords_from_the_digit_pass() -> None:
+    model = _FakeModel(
+        primary=" 2 10 69 36 64 ",
+        worded=" two ten sixty nine thirty six sixty four ",
+    )
+    transcriber = WhisperTranscriber()
+    transcriber._model = model
+
+    result = transcriber.transcribe_audio(np.zeros(160, dtype=np.float32))
+
+    assert result.text == "2 10 69 36 64"
+    assert result.alternatives == ("two ten sixty nine thirty six sixty four",)
+    assert model.calls[0]["hotwords"] is None
+    assert model.calls[1]["hotwords"] == "two ten sixty nine thirty six sixty four"
+
+
 def test_digit_only_word_pass_retries_with_greedy_decoding() -> None:
     model = _FakeModel(
         primary=" 2 10 69 36 64 ",
@@ -107,6 +123,7 @@ def test_digit_only_word_pass_retries_with_greedy_decoding() -> None:
     assert len(model.calls) == 3
     assert model.calls[1]["beam_size"] == 5
     assert model.calls[2]["beam_size"] == 1
+    assert model.calls[2]["hotwords"] == "two ten sixty nine thirty six sixty four"
 
 
 def test_low_confidence_segment_is_dropped() -> None:

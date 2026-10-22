@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -22,6 +23,46 @@ _NUMBER_WORDS = (
 _MAX_NO_SPEECH = 0.6
 _MIN_LOGPROB = -1.0
 _MAX_COMPRESSION = 2.4
+
+_ONES = ("zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine")
+_TEENS = (
+    "ten",
+    "eleven",
+    "twelve",
+    "thirteen",
+    "fourteen",
+    "fifteen",
+    "sixteen",
+    "seventeen",
+    "eighteen",
+    "nineteen",
+)
+_TENS = ("", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety")
+_WORD_GROUPS = re.compile(r"\d[\d,]*")
+
+
+def _group_words(value: int) -> str:
+    if value < 10:
+        return _ONES[value]
+    if value < 20:
+        return _TEENS[value - 10]
+    if value < 100:
+        tens, unit = divmod(value, 10)
+        return _TENS[tens] + (f" {_ONES[unit]}" if unit else "")
+    hundreds, remainder = divmod(value, 100)
+    words = f"{_ONES[hundreds]} hundred"
+    return f"{words} {_group_words(remainder)}" if remainder else words
+
+
+def _word_hint(text: str) -> str | None:
+    """Turn digit groups from the digit pass into a number-word decoding hint."""
+    groups: list[str] = []
+    for match in _WORD_GROUPS.findall(text):
+        raw = match.rstrip(",").replace(",", "")
+        if not raw.isdigit() or len(raw) > 3 or (raw != "0" and raw.startswith("0")):
+            continue
+        groups.append(_group_words(int(raw)))
+    return " ".join(groups) or None
 
 
 class WhisperTranscriber:
@@ -63,11 +104,14 @@ class WhisperTranscriber:
             primary, info = self._transcribe(model, audio, None, without_timestamps=True)
             worded = ""
             if has_number(primary):
-                worded, _ = self._transcribe(model, audio, _NUMBER_WORDS)
+                hotwords = _word_hint(primary)
+                worded, _ = self._transcribe(model, audio, _NUMBER_WORDS, hotwords=hotwords)
                 if worded and not any(character.isalpha() for character in worded):
                     # The prompted pass sometimes normalizes back to digits.
                     # Greedy decoding keeps the spoken number words instead.
-                    worded, _ = self._transcribe(model, audio, _NUMBER_WORDS, beam_size=1)
+                    worded, _ = self._transcribe(
+                        model, audio, _NUMBER_WORDS, beam_size=1, hotwords=hotwords
+                    )
         except TranscriptionError:
             raise
         except Exception as exc:
@@ -90,6 +134,7 @@ class WhisperTranscriber:
         *,
         beam_size: int = 5,
         without_timestamps: bool = False,
+        hotwords: str | None = None,
     ) -> tuple[str, TranscriptionInfo]:
         segments, info = model.transcribe(
             audio,
@@ -98,6 +143,7 @@ class WhisperTranscriber:
             condition_on_previous_text=False,
             initial_prompt=initial_prompt,
             without_timestamps=without_timestamps,
+            hotwords=hotwords,
         )
         text = " ".join(
             segment.text.strip()
