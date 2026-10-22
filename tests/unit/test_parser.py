@@ -39,6 +39,67 @@ def test_parse_candidates(text: str, expected: list[str]) -> None:
     assert digits(text) == expected
 
 
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("20 5", {"20 5", "25"}),
+        ("75", {"75", "70 5"}),
+        (
+            "2 10 6 9 30 6 6 4",
+            {
+                "2 10 6 9 30 6 6 4",
+                "2 10 6 9 36 6 4",
+            },
+        ),
+        (
+            "2 10 69 30 6 6 4",
+            {
+                "2 10 69 30 6 6 4",
+                "2 10 69 36 6 4",
+                "2 10 60 9 30 6 6 4",
+                "2 10 60 9 36 6 4",
+            },
+        ),
+        (
+            "0 0 30 69 700 24 1 3 50 2",
+            {
+                "0 0 30 69 700 24 1 3 50 2",
+                "0 0 30 69 700 24 1 3 52",
+                "0 0 30 69 700 20 4 1 3 50 2",
+                "0 0 30 69 700 20 4 1 3 52",
+                "0 0 30 69 724 1 3 50 2",
+                "0 0 30 69 724 1 3 52",
+                "0 0 30 69 720 4 1 3 50 2",
+                "0 0 30 69 720 4 1 3 52",
+                "0 0 30 60 9 700 24 1 3 50 2",
+                "0 0 30 60 9 700 24 1 3 52",
+                "0 0 30 60 9 700 20 4 1 3 50 2",
+                "0 0 30 60 9 700 20 4 1 3 52",
+                "0 0 30 60 9 724 1 3 50 2",
+                "0 0 30 60 9 724 1 3 52",
+                "0 0 30 60 9 720 4 1 3 50 2",
+                "0 0 30 60 9 720 4 1 3 52",
+            },
+        ),
+    ],
+)
+def test_digit_sequence_ambiguity(text: str, expected: set[str]) -> None:
+    assert {candidate.input for candidate in parse_candidates(text)} == expected
+
+
+def test_digit_ambiguity_can_be_disabled() -> None:
+    candidates = parse_candidates("2 10 69 30 6 6 4", digit_ambiguity=False)
+
+    assert [candidate.input for candidate in candidates] == ["2 10 69 30 6 6 4"]
+
+
+def test_two_ten_keeps_only_two_groups() -> None:
+    candidates = parse_candidates("2 10")
+
+    assert [candidate.input for candidate in candidates] == ["2 10"]
+    assert all("200" not in candidate.input for candidate in candidates)
+
+
 def test_twenty_five_keeps_both_interpretations() -> None:
     by_digits = {candidate.digits: candidate for candidate in parse_candidates("twenty five")}
 

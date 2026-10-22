@@ -58,10 +58,16 @@ class WhisperTranscriber:
     def transcribe_audio(self, audio: np.ndarray) -> Transcript:
         try:
             model = self._model_instance()
-            primary, info = self._transcribe(model, audio, None)
+            # Segment timestamps are unused and can inject numeric artifacts into
+            # the digit pass, such as an extra leading zero.
+            primary, info = self._transcribe(model, audio, None, without_timestamps=True)
             worded = ""
             if has_number(primary):
                 worded, _ = self._transcribe(model, audio, _NUMBER_WORDS)
+                if worded and not any(character.isalpha() for character in worded):
+                    # The prompted pass sometimes normalizes back to digits.
+                    # Greedy decoding keeps the spoken number words instead.
+                    worded, _ = self._transcribe(model, audio, _NUMBER_WORDS, beam_size=1)
         except TranscriptionError:
             raise
         except Exception as exc:
@@ -78,14 +84,20 @@ class WhisperTranscriber:
 
     @staticmethod
     def _transcribe(
-        model: WhisperModel, audio: np.ndarray, initial_prompt: str | None
+        model: WhisperModel,
+        audio: np.ndarray,
+        initial_prompt: str | None,
+        *,
+        beam_size: int = 5,
+        without_timestamps: bool = False,
     ) -> tuple[str, TranscriptionInfo]:
         segments, info = model.transcribe(
             audio,
             language="en",
-            beam_size=5,
+            beam_size=beam_size,
             condition_on_previous_text=False,
             initial_prompt=initial_prompt,
+            without_timestamps=without_timestamps,
         )
         text = " ".join(
             segment.text.strip()

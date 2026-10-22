@@ -122,7 +122,7 @@ def test_group_too_large_keeps_the_primary_transcript(tmp_path: Path) -> None:
 
 
 def test_parser_failure_stays_typed(tmp_path: Path, monkeypatch) -> None:
-    def boom(text: str) -> None:
+    def boom(text: str, **kwargs: object) -> None:
         raise RuntimeError("parser bug")
 
     monkeypatch.setattr("main.engine.parse_candidates", boom)
@@ -172,6 +172,32 @@ def test_alternative_transcript_adds_candidates(tmp_path: Path) -> None:
     assert result.error is None
     assert "205" in {candidate.digits for candidate in result.candidates}
     assert "00302101234567" in {candidate.digits for candidate in result.candidates}
+
+
+def test_digit_ambiguity_runs_when_no_word_alternative(tmp_path: Path) -> None:
+    result = RecognitionEngine(FakeTranscriber("2 10 69 30 6 6 4")).recognize_file(_audio(tmp_path))
+
+    assert result.error is None
+    assert {candidate.input for candidate in result.candidates} == {
+        "2 10 69 30 6 6 4",
+        "2 10 69 36 6 4",
+        "2 10 60 9 30 6 6 4",
+        "2 10 60 9 36 6 4",
+    }
+
+
+def test_word_alternative_suppresses_primary_digit_ambiguity(tmp_path: Path) -> None:
+    transcriber = FakeTranscriber(
+        "210 69 36 64",
+        alternatives=("two ten sixty nine thirty six sixty four",),
+    )
+
+    result = RecognitionEngine(transcriber).recognize_file(_audio(tmp_path))
+
+    inputs = {candidate.input for candidate in result.candidates}
+    assert "210 69 36 64" in inputs
+    assert "210 60 9 36 64" not in inputs
+    assert "2 10 60 9 36 64" in inputs
 
 
 def test_microphone_result_is_parsed() -> None:

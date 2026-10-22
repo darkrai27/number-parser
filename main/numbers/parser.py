@@ -313,11 +313,112 @@ def _item(tokens: list[_Token], index: int) -> _Parsed:
     return parsed
 
 
-def _parse_run(tokens: list[_Token]) -> list[_Variant]:
+def _canonical_group(text: str) -> bool:
+    return text.isdigit() and (text == "0" or not text.startswith("0"))
+
+
+def _digit_split(text: str) -> tuple[str, str] | None:
+    if len(text) != 2 or not _canonical_group(text):
+        return None
+    tens, unit = divmod(int(text), 10)
+    if not tens or not unit:
+        return None
+    return str(tens * 10), str(unit)
+
+
+def _digit_combine(first: str, second: str) -> int | None:
+    if not _canonical_group(first) or not _canonical_group(second):
+        return None
+    left, right = int(first), int(second)
+    if 20 <= left <= 90 and left % 10 == 0 and 1 <= right <= 9:
+        return left + right
+    if 100 <= left <= 900 and left % 100 == 0 and 0 < right < 100:
+        return left + right
+    if 100 <= left <= 990 and left % 10 == 0 and 1 <= right <= 9:
+        return left + right
+    return None
+
+
+def _combined_groupings(value: int) -> list[tuple[tuple[str, ...], frozenset[str]]]:
+    text = str(value)
+    groups: list[tuple[tuple[str, ...], frozenset[str]]] = [((text,), frozenset({"compound"}))]
+    if 100 <= value <= 999:
+        hundreds, remainder = divmod(value, 100)
+        hundreds *= 100
+        if remainder:
+            groups.append(((str(hundreds), str(remainder)), frozenset({"split"})))
+            tens, unit = divmod(remainder, 10)
+            if tens and unit:
+                groups.append(
+                    (
+                        (str(hundreds), str(tens * 10), str(unit)),
+                        frozenset({"split"}),
+                    )
+                )
+                groups.append(
+                    (
+                        (str(hundreds + tens * 10), str(unit)),
+                        frozenset({"split"}),
+                    )
+                )
+    return groups
+
+
+def _digit_groupings(tokens: list[_Token]) -> list[tuple[tuple[str, ...], frozenset[str]]]:
+    results: list[tuple[tuple[str, ...], frozenset[str]]] = []
+    seen: set[tuple[str, ...]] = set()
+
+    def add(groups: tuple[str, ...], flags: frozenset[str]) -> None:
+        if groups in seen:
+            return
+        seen.add(groups)
+        results.append((groups, flags))
+
+    def visit(index: int, groups: tuple[str, ...], flags: frozenset[str]) -> None:
+        if len(results) >= _MAX_STATES:
+            return
+        if index == len(tokens):
+            add(groups, flags)
+            return
+
+        text = tokens[index].text
+        visit(index + 1, (*groups, text), flags)
+
+        split = _digit_split(text)
+        if split is not None:
+            visit(index + 1, (*groups, *split), flags | {"split"})
+
+        if index + 1 < len(tokens):
+            combined = _digit_combine(text, tokens[index + 1].text)
+            if combined is not None:
+                for suffix, extra_flags in _combined_groupings(combined):
+                    visit(index + 2, (*groups, *suffix), flags | extra_flags)
+
+    visit(0, (), frozenset())
+    return results
+
+
+def _digit_variants(tokens: list[_Token]) -> tuple[_Variant, ...]:
+    return tuple(
+        _Variant("".join(groups), " ".join(groups), flags)
+        for groups, flags in _digit_groupings(tokens)
+    )
+
+
+def _parse_run(tokens: list[_Token], *, digit_ambiguity: bool = True) -> list[_Variant]:
     states: list[_Variant] = [_Variant("", "", frozenset())]
     index = 0
     while index < len(tokens):
-        item = _item(tokens, index)
+        if digit_ambiguity and tokens[index].kind == "digits":
+            end = index + 1
+            while end < len(tokens) and tokens[end].kind == "digits":
+                end += 1
+            variants = _digit_variants(tokens[index:end])
+            next_index = end
+        else:
+            item = _item(tokens, index)
+            variants = item.variants
+            next_index = item.next_index
         states = _dedupe(
             [
                 _Variant(
@@ -326,10 +427,10 @@ def _parse_run(tokens: list[_Token]) -> list[_Variant]:
                     state.flags | variant.flags,
                 )
                 for state in states
-                for variant in item.variants
+                for variant in variants
             ]
         )
-        index = item.next_index
+        index = next_index
     return states
 
 
@@ -345,8 +446,12 @@ def has_number(text: str) -> bool:
     return any(token is not None for token in _tokenize(text))
 
 
-def parse_candidates(text: str) -> tuple[Candidate, ...]:
-    """Extract every plausible digit sequence from an English transcript."""
+def parse_candidates(text: str, *, digit_ambiguity: bool = True) -> tuple[Candidate, ...]:
+    """Extract every plausible digit sequence from an English transcript.
+
+    Digit-sequence ambiguity is on by default. The engine disables it for the
+    primary transcript when a word-form alternative supplies the grouping.
+    """
     tokens = _tokenize(text)
     if any(
         token is not None
@@ -372,7 +477,7 @@ def parse_candidates(text: str) -> tuple[Candidate, ...]:
     for run in runs:
         if all(token.weak for token in run):
             continue
-        parsed = _parse_run(run)
+        parsed = _parse_run(run, digit_ambiguity=digit_ambiguity)
         for variant in parsed:
             if not variant.digits or variant.digits in seen:
                 continue

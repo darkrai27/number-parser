@@ -90,10 +90,14 @@ class RecognitionEngine:
         candidates: list[Candidate] = []
         seen: set[str] = set()
         primary_group_error = False
+        has_alternatives = any(transcript.alternatives)
         try:
             for index, text in enumerate((transcript.text, *transcript.alternatives)):
                 try:
-                    parsed = parse_candidates(text)
+                    parsed = parse_candidates(
+                        text,
+                        digit_ambiguity=index > 0 or not has_alternatives,
+                    )
                 except GroupTooLargeError:
                     if index > 0:
                         diagnostic = (
